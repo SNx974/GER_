@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Tente une extraction automatique des stats joueurs depuis des screenshots
- * déjà uploadés (reconnaissance d'image via Gemini). Utilisée par le
+ * déjà uploadés (reconnaissance d'image via OpenRouter). Utilisée par le
  * formulaire de résultat comme pré-remplissage optionnel — si l'IA ne
  * détecte rien, la saisie manuelle reste le repli normal.
  */

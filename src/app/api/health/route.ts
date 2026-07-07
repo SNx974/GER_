@@ -21,7 +21,7 @@ export async function GET() {
       NEXTAUTH_URL: process.env.NEXTAUTH_URL ?? "(non défini)",
       ADMIN_EMAIL: Boolean(process.env.ADMIN_EMAIL),
       ADMIN_PASSWORD: Boolean(process.env.ADMIN_PASSWORD),
-      GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
+      OPENROUTER_API_KEY: Boolean(process.env.OPENROUTER_API_KEY),
     },
   };
 

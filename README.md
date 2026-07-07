@@ -48,8 +48,8 @@ L'app tourne sur http://localhost:3000
 - [x] **1. Espace Équipe & gestion des joueurs** — CRUD joueurs + limite, profil public (classement/historique), réglage global admin
 - [x] **2. Planning & propositions de match** — disponibilités, logique de conflit, propositions accept/refus, notifications
 - [x] **3. Mapban temps réel (Match Room)** — lien unique, veto tour par tour BO1/BO3/BO5 via SSE, récap decider
-- [x] **4. Résultats + analyse IA** — upload de screenshots (drag & drop), extraction de stats via Gemini
-      (repli sur saisie manuelle), analyse d'anomalies, double validation + modération admin dédiée
+- [x] **4. Résultats + analyse IA** — upload de screenshots (drag & drop), extraction de stats via
+      OpenRouter (repli sur saisie manuelle), analyse d'anomalies, double validation + modération admin dédiée
 - [x] **5. Leaderboard** — classement équipes (points/V-D) + individuel (TOP KILLER)
 - [x] **6. Administration des matchs** — vue de tous les matchs (annuler/supprimer), minimum de joueurs
       requis pour jouer (réglage global)
@@ -62,10 +62,12 @@ L'app tourne sur http://localhost:3000
 - **Temps réel (Mapban)** : Server-Sent Events via un bus d'événements en mémoire
   ([src/lib/realtime.ts](src/lib/realtime.ts)). OK pour un serveur unique ; pour du
   multi-instance/serverless, remplacer par Redis pub/sub, Pusher ou Ably (même interface).
-- **Analyse IA** : reconnaissance d'image via **Google Gemini** (`GEMINI_API_KEY`).
-  Les screenshots sont téléchargés et envoyés en inline à Gemini pour comparer les
-  stats déclarées aux tableaux des scores. Sans clé, repli heuristique local.
-- **Screenshots** : stockés sous forme d'URLs (pas d'upload de fichiers intégré pour l'instant).
+- **Analyse IA** : reconnaissance d'image via **OpenRouter** (`OPENROUTER_API_KEY`), modèle par
+  défaut `google/gemma-4-31b-it:free` (gratuit, vision). Les screenshots sont envoyés en base64 pour
+  comparer les stats déclarées aux tableaux des scores et pré-remplir les stats. Sans clé, repli
+  heuristique local. Le modèle est configurable via `OPENROUTER_MODEL` sans changer de code.
+- **Screenshots** : uploadés via `/api/upload` et stockés dans `uploads/` (voir la section
+  Déploiement ci-dessous pour le montage du volume persistant).
 
 ## Déploiement (Dokploy)
 
@@ -86,8 +88,8 @@ plateforme (Dockerfile ou détection automatique type Nixpacks).
    | `NEXTAUTH_SECRET` | un secret aléatoire (`openssl rand -base64 32`) |
    | `NEXTAUTH_URL` | l'URL publique de l'app, **avec le protocole** (ex : `https://ger.mondomaine.com`) |
    | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | l'admin initial |
-   | `GEMINI_API_KEY` | clé Google AI Studio (reconnaissance d'image) |
-   | `GEMINI_MODEL` | `gemini-2.0-flash` (optionnel) |
+   | `OPENROUTER_API_KEY` | clé gratuite depuis [openrouter.ai/keys](https://openrouter.ai/keys) (reconnaissance d'image) |
+   | `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` (optionnel, défaut déjà appliqué) |
 
 4. **Port** : l'app écoute sur `3000`.
 5. **Volume persistant (important)** : monter un volume Dokploy sur `/app/uploads`.

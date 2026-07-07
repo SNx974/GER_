@@ -1,8 +1,10 @@
 /**
  * Analyse IA des résultats de match (reconnaissance d'image + cohérence stats).
  *
- * - Si GEMINI_API_KEY est défini : appel à l'API Google Gemini (lecture des
- *   screenshots de tableaux des scores + détection d'anomalies).
+ * - Si OPENROUTER_API_KEY est défini : appel à OpenRouter (API unifiée,
+ *   compatible OpenAI) avec un modèle vision gratuit — par défaut Gemma 4
+ *   31B — pour lire les screenshots de tableaux des scores et détecter des
+ *   anomalies / en extraire les stats.
  * - Sinon : repli heuristique local pour que le flux reste fonctionnel.
  *
  * Le résultat est stocké tel quel dans MatchResult.aiAnalysis (JSON).
@@ -25,7 +27,7 @@ export type MapStatInput = {
 };
 
 export type AiAnalysis = {
-  provider: "gemini" | "heuristic";
+  provider: "openrouter" | "heuristic";
   flagged: boolean;
   summary: string;
   anomalies: string[];
@@ -34,6 +36,7 @@ export type AiAnalysis = {
 
 const KILLS_MAX_PLAUSIBLE = 50; // par map
 const SCORE_DIFF_MAX = 5; // écart toléré total kills vs total morts sur une map
+const DEFAULT_MODEL = "google/gemma-4-31b-it:free";
 
 function heuristicAnalysis(maps: MapStatInput[]): AiAnalysis {
   const anomalies: string[] = [];
@@ -90,79 +93,131 @@ function resolveInternalUrl(url: string): string {
   return `http://127.0.0.1:${port}${url}`;
 }
 
-/** Télécharge une image et la convertit en base64 (pour l'envoi inline à Gemini). */
-async function fetchImageAsInline(
-  url: string
-): Promise<{ mimeType: string; data: string } | null> {
+/** Télécharge une image et la convertit en data URL base64 (format OpenAI/OpenRouter). */
+async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(resolveInternalUrl(url));
     if (!res.ok) return null;
     const mimeType = res.headers.get("content-type") ?? "image/png";
     if (!mimeType.startsWith("image/")) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
-    return { mimeType, data: buffer.toString("base64") };
+    return `data:${mimeType};base64,${buffer.toString("base64")}`;
   } catch {
     return null;
   }
 }
 
-async function geminiAnalysis(
+/**
+ * Extrait un objet JSON de la réponse d'un modèle, même s'il est entouré de
+ * texte ou de balises markdown ```json ... ``` — les modèles gratuits ne
+ * respectent pas toujours strictement le format demandé.
+ */
+function extractJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // on tente d'autres stratégies ci-dessous
+  }
+
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1]);
+    } catch {
+      // ignore
+    }
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      // ignore
+    }
+  }
+
+  throw new Error("Réponse IA non exploitable (JSON introuvable)");
+}
+
+type VisionContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+/** Construit le contenu multimodal (texte + images) pour un appel OpenRouter. */
+async function buildVisionContent(
+  prompt: string,
+  screenshots: string[]
+): Promise<VisionContentPart[]> {
+  const content: VisionContentPart[] = [{ type: "text", text: prompt }];
+  for (const url of screenshots.slice(0, 4)) {
+    const dataUrl = await fetchImageAsDataUrl(url);
+    if (dataUrl) content.push({ type: "image_url", image_url: { url: dataUrl } });
+  }
+  return content;
+}
+
+async function callOpenRouter(
   apiKey: string,
+  model: string,
+  content: VisionContentPart[]
+): Promise<unknown> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": process.env.NEXTAUTH_URL ?? "http://localhost:3000",
+      "X-Title": "GER Esport Manager",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content }],
+      temperature: 0,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`OpenRouter API ${res.status}${body ? ` — ${body.slice(0, 200)}` : ""}`);
+  }
+
+  const data = (await res.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  const text = data.choices?.[0]?.message?.content ?? "";
+  if (!text) throw new Error("Réponse OpenRouter vide");
+  return extractJson(text);
+}
+
+async function openRouterAnalysis(
+  apiKey: string,
+  model: string,
   screenshots: string[],
   maps: MapStatInput[]
 ): Promise<AiAnalysis> {
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
   const prompt =
     "Tu es un analyste anti-triche esport (FPS tactique type Valorant/CS). " +
     "Compare les statistiques déclarées avec les screenshots des tableaux des " +
     "scores. Détecte les incohérences et anomalies : chiffres ne correspondant " +
     "pas aux images, scores impossibles, ratio kills/morts irréaliste, écart " +
     "entre total des kills et total des morts. " +
-    'Réponds STRICTEMENT en JSON : {"flagged": boolean, "summary": string, "anomalies": string[]}. ' +
+    'Réponds STRICTEMENT en JSON, sans aucun texte autour : {"flagged": boolean, "summary": string, "anomalies": string[]}. ' +
     "Statistiques déclarées : " +
     JSON.stringify(maps);
 
-  const parts: unknown[] = [{ text: prompt }];
-
-  // Reconnaissance d'image : on joint les screenshots en inline base64
-  for (const url of screenshots.slice(0, 4)) {
-    const inline = await fetchImageAsInline(url);
-    if (inline) {
-      parts.push({
-        inline_data: { mime_type: inline.mimeType, data: inline.data },
-      });
-    }
-  }
-
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts }],
-      generationConfig: { responseMimeType: "application/json", temperature: 0 },
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Gemini API ${res.status}`);
-  }
-
-  const data = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
-  };
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-  const parsed = JSON.parse(text) as {
+  const content = await buildVisionContent(prompt, screenshots);
+  const parsed = (await callOpenRouter(apiKey, model, content)) as {
     flagged?: boolean;
     summary?: string;
     anomalies?: string[];
   };
 
   return {
-    provider: "gemini",
+    provider: "openrouter",
     flagged: Boolean(parsed.flagged),
-    summary: parsed.summary ?? "Analyse Gemini effectuée.",
+    summary: parsed.summary ?? "Analyse effectuée.",
     anomalies: Array.isArray(parsed.anomalies) ? parsed.anomalies : [],
     raw: parsed,
   };
@@ -172,15 +227,16 @@ export async function analyzeResult(
   screenshots: string[],
   maps: MapStatInput[]
 ): Promise<AiAnalysis> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return heuristicAnalysis(maps);
 
+  const model = process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
   try {
-    return await geminiAnalysis(apiKey, screenshots, maps);
+    return await openRouterAnalysis(apiKey, model, screenshots, maps);
   } catch (e) {
     // En cas d'erreur API, on retombe sur l'heuristique (flux non bloquant)
     const fallback = heuristicAnalysis(maps);
-    fallback.summary = `IA Gemini indisponible (${
+    fallback.summary = `IA indisponible (${
       e instanceof Error ? e.message : "erreur"
     }) — analyse heuristique appliquée. ${fallback.summary}`;
     return fallback;
@@ -203,25 +259,24 @@ export type RosterPlayer = { id: string; pseudo: string };
 
 /**
  * Tente d'extraire les statistiques des joueurs depuis les screenshots
- * fournis (reconnaissance d'image via Gemini). Ne renvoie que les lignes
- * rattachées avec certitude à un pseudo de l'effectif connu — le reste
- * doit être saisi manuellement par les capitaines.
+ * fournis (reconnaissance d'image via OpenRouter). Ne renvoie que les
+ * lignes rattachées avec certitude à un pseudo de l'effectif connu — le
+ * reste doit être saisi manuellement par les capitaines.
  *
- * Renvoie un tableau vide si aucune clé Gemini n'est configurée, si aucun
- * screenshot n'est exploitable, ou si l'IA ne détecte rien (cas "l'IA ne
- * trouve pas" → repli sur la saisie manuelle déjà prévue dans le formulaire).
+ * Renvoie un tableau vide si aucune clé OpenRouter n'est configurée, si
+ * aucun screenshot n'est exploitable, ou si l'IA ne détecte rien (cas "l'IA
+ * ne trouve pas" → repli sur la saisie manuelle déjà prévue dans le formulaire).
  */
 export async function extractStatsFromScreenshots(
   screenshots: string[],
   roster: RosterPlayer[]
 ): Promise<ExtractedStat[]> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey || screenshots.length === 0 || roster.length === 0) return [];
 
-  try {
-    const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const model = process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
 
+  try {
     const rosterList = roster.map((p) => p.pseudo).join(", ");
     const prompt =
       "Tu lis un ou plusieurs screenshots de tableau des scores d'un match " +
@@ -231,34 +286,12 @@ export async function extractStatsFromScreenshots(
       "cet effectif, extrait ses statistiques (kills, morts, assists, score). " +
       "Ignore toute ligne que tu ne peux pas rattacher clairement à un pseudo " +
       "de cette liste. " +
-      'Réponds STRICTEMENT en JSON : {"players": [{"pseudo": string, "kills": number, "deaths": number, "assists": number, "score": number}]}.';
+      'Réponds STRICTEMENT en JSON, sans aucun texte autour : {"players": [{"pseudo": string, "kills": number, "deaths": number, "assists": number, "score": number}]}.';
 
-    const parts: unknown[] = [{ text: prompt }];
-    for (const url of screenshots.slice(0, 4)) {
-      const inline = await fetchImageAsInline(url);
-      if (inline) {
-        parts.push({
-          inline_data: { mime_type: inline.mimeType, data: inline.data },
-        });
-      }
-    }
-    if (parts.length === 1) return []; // aucune image exploitable
+    const content = await buildVisionContent(prompt, screenshots);
+    if (content.length === 1) return []; // aucune image exploitable
 
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0 },
-      }),
-    });
-    if (!res.ok) return [];
-
-    const data = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-    const parsed = JSON.parse(text) as {
+    const parsed = (await callOpenRouter(apiKey, model, content)) as {
       players?: {
         pseudo?: string;
         kills?: number;
