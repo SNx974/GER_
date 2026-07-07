@@ -33,7 +33,10 @@ export default async function AdminSettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <SettingsForm initialMax={setting.maxPlayersPerTeam} />
+          <SettingsForm
+            initialMax={setting.maxPlayersPerTeam}
+            initialMin={setting.minPlayersToPlay}
+          />
         </CardContent>
       </Card>
 

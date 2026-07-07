@@ -103,6 +103,26 @@ export default async function AdminResultsPage() {
                         ))}
                       </ul>
                     )}
+                    {r.screenshots.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {r.screenshots.map((url, i) => (
+                          <a
+                            key={i}
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block h-20 w-20 overflow-hidden rounded-md border transition-opacity hover:opacity-80"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={url}
+                              alt={`Screenshot ${i + 1}`}
+                              className="h-full w-full object-cover"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span>
                         Validation capitaines : {r.teamAValidated ? "✅" : "⏳"}{" "}

@@ -8,6 +8,7 @@ import { auth } from "@/lib/session";
 import { getAdminContext } from "@/lib/guards";
 import { createAdminSchema, type CreateAdminInput } from "@/lib/validators/auth";
 import { mapSchema, type MapInput } from "@/lib/validators/map";
+import { POINTS_WIN, POINTS_LOSS } from "@/lib/constants";
 import { ok, fail, type ActionResult } from "@/lib/actions";
 
 export async function updateMaxPlayers(value: number): Promise<ActionResult> {
@@ -28,6 +29,27 @@ export async function updateMaxPlayers(value: number): Promise<ActionResult> {
 
   revalidatePath("/admin/settings");
   revalidatePath("/team");
+  return ok();
+}
+
+export async function updateMinPlayers(value: number): Promise<ActionResult> {
+  const session = await auth();
+  if (session?.user.role !== "ADMIN") {
+    return fail("Action réservée aux administrateurs");
+  }
+
+  if (!Number.isInteger(value) || value < 1 || value > 20) {
+    return fail("Le minimum doit être un entier entre 1 et 20.");
+  }
+
+  await prisma.globalSetting.upsert({
+    where: { id: "global" },
+    update: { minPlayersToPlay: value },
+    create: { id: "global", minPlayersToPlay: value },
+  });
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/planning");
   return ok();
 }
 
@@ -129,5 +151,96 @@ export async function deleteMap(mapId: string): Promise<ActionResult> {
   await prisma.gameMap.delete({ where: { id: mapId } });
 
   revalidatePath("/admin/maps");
+  return ok();
+}
+
+// ─── Gestion de tous les matchs (vue admin) ───
+
+export async function cancelMatch(matchId: string): Promise<ActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    select: { status: true },
+  });
+  if (!match) return fail("Match introuvable.");
+  if (match.status === "COMPLETED") {
+    return fail("Un match terminé ne peut pas être annulé (supprimez-le si nécessaire).");
+  }
+
+  await prisma.match.update({
+    where: { id: matchId },
+    data: { status: "CANCELLED", currentTurnTeamId: null },
+  });
+
+  revalidatePath("/admin/matches");
+  revalidatePath("/matches");
+  return ok();
+}
+
+/**
+ * Suppression définitive d'un match. Si le match était validé (COMPLETED),
+ * on annule d'abord son impact sur les compteurs dénormalisés (points/V/D
+ * des équipes, stats cumulées des joueurs) avant de supprimer la ligne —
+ * la suppression cascade sur mapban/maps/résultat/stats détaillées.
+ */
+export async function deleteMatch(matchId: string): Promise<ActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: {
+      result: { select: { status: true } },
+    },
+  });
+  if (!match) return fail("Match introuvable.");
+
+  const ops: Prisma.PrismaPromise<unknown>[] = [];
+
+  if (match.status === "COMPLETED" && match.result?.status === "VALIDATED") {
+    const agg = await prisma.playerMatchStat.groupBy({
+      by: ["playerId"],
+      where: { matchMap: { matchId } },
+      _sum: { kills: true, deaths: true, assists: true },
+    });
+    for (const row of agg) {
+      ops.push(
+        prisma.player.update({
+          where: { id: row.playerId },
+          data: {
+            totalKills: { decrement: row._sum.kills ?? 0 },
+            totalDeaths: { decrement: row._sum.deaths ?? 0 },
+            totalAssists: { decrement: row._sum.assists ?? 0 },
+            matchesPlayed: { decrement: 1 },
+          },
+        })
+      );
+    }
+    if (match.winnerId) {
+      const loserId =
+        match.winnerId === match.teamAId ? match.teamBId : match.teamAId;
+      ops.push(
+        prisma.team.update({
+          where: { id: match.winnerId },
+          data: { wins: { decrement: 1 }, points: { decrement: POINTS_WIN } },
+        }),
+        prisma.team.update({
+          where: { id: loserId },
+          data: { losses: { decrement: 1 }, points: { decrement: POINTS_LOSS } },
+        })
+      );
+    }
+  }
+
+  ops.push(prisma.match.delete({ where: { id: matchId } }));
+
+  await prisma.$transaction(ops);
+
+  revalidatePath("/admin/matches");
+  revalidatePath("/admin/results");
+  revalidatePath("/matches");
+  revalidatePath("/leaderboard");
   return ok();
 }

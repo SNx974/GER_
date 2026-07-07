@@ -35,3 +35,6 @@ yarn-error.log*
 
 # docker volumes
 /postgres-data
+
+# screenshots uploadés (montés en volume persistant en prod)
+/uploads

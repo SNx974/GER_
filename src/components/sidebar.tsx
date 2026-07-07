@@ -27,6 +27,7 @@ export async function Sidebar() {
     { href: "/notifications", label: "Notifications", icon: "notifications", badge: unread },
     ...(isAdmin
       ? ([
+          { href: "/admin/matches", label: "Matchs", icon: "matches" },
           { href: "/admin/results", label: "Résultats", icon: "results" },
           { href: "/admin/maps", label: "Maps", icon: "maps" },
           { href: "/admin/settings", label: "Paramètres", icon: "settings" },

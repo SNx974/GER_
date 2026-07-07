@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getCaptainContext } from "@/lib/guards";
 import { findConflict, conflictMessage } from "@/lib/planning";
 import { notify } from "@/lib/notifications";
+import { getMinPlayersToPlay } from "@/lib/settings";
 import {
   availabilitySchema,
   proposalSchema,
@@ -82,6 +83,22 @@ export async function createProposal(
   });
   if (!opponent) return fail("Équipe adverse introuvable.");
 
+  const minPlayers = await getMinPlayersToPlay();
+  const [myCount, oppCount] = await Promise.all([
+    prisma.player.count({ where: { teamId: ctx.teamId, isActive: true } }),
+    prisma.player.count({ where: { teamId: opponentTeamId, isActive: true } }),
+  ]);
+  if (myCount < minPlayers) {
+    return fail(
+      `Votre équipe doit compter au moins ${minPlayers} joueur(s) actif(s) pour proposer un match (actuellement ${myCount}).`
+    );
+  }
+  if (oppCount < minPlayers) {
+    return fail(
+      `${opponent.name} n'a pas encore assez de joueurs actifs (minimum ${minPlayers}).`
+    );
+  }
+
   const conflict = await findConflict([ctx.teamId, opponentTeamId], proposedDate);
   if (conflict) return fail(conflictMessage(conflict));
 
@@ -145,7 +162,18 @@ export async function respondProposal(
     return ok();
   }
 
-  // Re-vérification du conflit au moment de l'acceptation
+  // Re-vérification du minimum de joueurs et du conflit au moment de l'acceptation
+  const minPlayers = await getMinPlayersToPlay();
+  const [aCount, bCount] = await Promise.all([
+    prisma.player.count({ where: { teamId: proposal.proposingTeamId, isActive: true } }),
+    prisma.player.count({ where: { teamId: proposal.opponentTeamId, isActive: true } }),
+  ]);
+  if (aCount < minPlayers || bCount < minPlayers) {
+    return fail(
+      `Chaque équipe doit compter au moins ${minPlayers} joueur(s) actif(s) pour démarrer un match.`
+    );
+  }
+
   const conflict = await findConflict(
     [proposal.proposingTeamId, proposal.opponentTeamId],
     proposal.proposedDate

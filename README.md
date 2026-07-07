@@ -48,8 +48,11 @@ L'app tourne sur http://localhost:3000
 - [x] **1. Espace Équipe & gestion des joueurs** — CRUD joueurs + limite, profil public (classement/historique), réglage global admin
 - [x] **2. Planning & propositions de match** — disponibilités, logique de conflit, propositions accept/refus, notifications
 - [x] **3. Mapban temps réel (Match Room)** — lien unique, veto tour par tour BO1/BO3/BO5 via SSE, récap decider
-- [x] **4. Résultats + analyse IA** — soumission score/stats/screenshots, analyse OpenAI (repli heuristique), double validation
+- [x] **4. Résultats + analyse IA** — upload de screenshots (drag & drop), extraction de stats via Gemini
+      (repli sur saisie manuelle), analyse d'anomalies, double validation + modération admin dédiée
 - [x] **5. Leaderboard** — classement équipes (points/V-D) + individuel (TOP KILLER)
+- [x] **6. Administration des matchs** — vue de tous les matchs (annuler/supprimer), minimum de joueurs
+      requis pour jouer (réglage global)
 
 ## Notes techniques
 
@@ -84,6 +87,9 @@ plateforme (Dockerfile ou détection automatique type Nixpacks).
    | `GEMINI_MODEL` | `gemini-2.0-flash` (optionnel) |
 
 4. **Port** : l'app écoute sur `3000`.
+5. **Volume persistant (important)** : monter un volume Dokploy sur `/app/uploads`.
+   Les screenshots uploadés par les équipes y sont stockés (route `/api/upload`) ;
+   sans volume, ils sont perdus à chaque redéploiement du conteneur.
 
 Au premier démarrage, les tables sont créées et l'admin + le pool de maps sont seedés
 automatiquement. En cas de doute sur la config, visiter `/api/health` : elle

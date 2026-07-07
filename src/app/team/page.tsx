@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ExternalLink, Trophy } from "lucide-react";
 import { requireAuth } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { getMaxPlayersPerTeam } from "@/lib/settings";
+import { getMaxPlayersPerTeam, getMinPlayersToPlay } from "@/lib/settings";
 import { getTeamRank } from "@/lib/teams";
 import { AppShell } from "@/components/app-shell";
 import { PlayerManager } from "./player-manager";
@@ -24,7 +24,7 @@ export default async function TeamManagementPage() {
     redirect("/dashboard");
   }
 
-  const [team, maxPlayers, rankInfo] = await Promise.all([
+  const [team, maxPlayers, minPlayers, rankInfo] = await Promise.all([
     prisma.team.findUnique({
       where: { id: session.user.teamId },
       include: {
@@ -32,10 +32,13 @@ export default async function TeamManagementPage() {
       },
     }),
     getMaxPlayersPerTeam(),
+    getMinPlayersToPlay(),
     getTeamRank(session.user.teamId),
   ]);
 
   if (!team) redirect("/dashboard");
+
+  const activeCount = team.players.filter((p) => p.isActive).length;
 
   return (
     <AppShell>
@@ -87,6 +90,14 @@ export default async function TeamManagementPage() {
           </CardHeader>
         </Card>
       </div>
+
+      {activeCount < minPlayers && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          Il vous manque {minPlayers - activeCount} joueur(s) actif(s) pour
+          pouvoir proposer ou accepter un match (minimum {minPlayers}
+          requis).
+        </div>
+      )}
 
       <Card>
         <CardHeader>

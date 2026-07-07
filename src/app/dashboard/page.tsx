@@ -82,6 +82,9 @@ export default async function DashboardPage() {
               </Link>
             </Button>
             <Button asChild size="sm" variant="outline">
+              <Link href="/admin/matches">Tous les matchs</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
               <Link href="/admin/maps">Pool de maps</Link>
             </Button>
             <Button asChild size="sm" variant="outline">

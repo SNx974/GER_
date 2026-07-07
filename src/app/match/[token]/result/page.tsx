@@ -169,16 +169,21 @@ export default async function ResultPage({
               <CardHeader>
                 <CardTitle className="text-base">Screenshots</CardTitle>
               </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
+              <CardContent className="flex flex-wrap gap-3">
                 {result.screenshots.map((url, i) => (
                   <a
                     key={i}
                     href={url}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-sm text-primary hover:underline"
+                    className="block h-28 w-28 overflow-hidden rounded-md border transition-opacity hover:opacity-80"
                   >
-                    Image {i + 1}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt={`Screenshot ${i + 1}`}
+                      className="h-full w-full object-cover"
+                    />
                   </a>
                 ))}
               </CardContent>

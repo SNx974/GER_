@@ -143,6 +143,7 @@ model Player {
 model GlobalSetting {
   id                String   @id @default("global")
   maxPlayersPerTeam Int      @default(7)
+  minPlayersToPlay  Int      @default(5)
   updatedAt         DateTime @updatedAt
 }
 

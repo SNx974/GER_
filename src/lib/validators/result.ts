@@ -16,7 +16,8 @@ export const mapResultSchema = z.object({
 });
 
 export const submitResultSchema = z.object({
-  screenshots: z.array(z.string().url("URL invalide")).max(10),
+  // Chemins internes (/api/uploads/xxx) issus de l'upload, ou URL externe.
+  screenshots: z.array(z.string().min(1)).max(10),
   maps: z.array(mapResultSchema).min(1),
 });
 
