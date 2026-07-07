@@ -56,6 +56,8 @@ L'app tourne sur http://localhost:3000
 - [x] **7. Double soumission + arbitrage admin** — chaque équipe peut soumettre sa propre version du
       résultat (screenshots + stats), comparées côte à côte ; l'admin a toujours le dernier mot et peut
       corriger manuellement les stats officielles, même sur un résultat déjà validé (classement recalculé)
+- [x] **8. Tchat IA admin** — discussion libre avec l'IA (OpenRouter) depuis `/admin/chat`, sans accès
+      aux données de la plateforme ; historique conservé côté navigateur (session) uniquement
 
 ## Notes techniques
 

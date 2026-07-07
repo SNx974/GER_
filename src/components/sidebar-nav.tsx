@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
   Bell,
+  Bot,
   CalendarDays,
   ClipboardCheck,
   Gamepad2,
@@ -38,6 +39,7 @@ const ICONS = {
   settings: Settings,
   results: ClipboardCheck,
   maps: MapIcon,
+  chat: Bot,
 };
 
 export function SidebarNav({ links }: { links: NavLink[] }) {

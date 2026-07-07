@@ -322,3 +322,76 @@ export async function extractStatsFromScreenshots(
     return [];
   }
 }
+
+// ─────────────────────────────────────────────
+// Tchat IA libre (admin)
+// ─────────────────────────────────────────────
+
+export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+
+async function callOpenRouterChat(
+  apiKey: string,
+  model: string,
+  messages: ChatMessage[]
+): Promise<string> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": process.env.NEXTAUTH_URL ?? "http://localhost:3000",
+      "X-Title": "GER Esport Manager",
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.7 }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`OpenRouter API ${res.status}${body ? ` — ${body.slice(0, 200)}` : ""}`);
+  }
+
+  const data = (await res.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
+  const text = data.choices?.[0]?.message?.content ?? "";
+  if (!text) throw new Error("Réponse OpenRouter vide");
+  return text;
+}
+
+const CHAT_SYSTEM_PROMPT =
+  "Tu es l'assistant IA intégré à GER Esport Manager, une plateforme de " +
+  "gestion de tournois et d'équipes esport. Tu discutes avec un " +
+  "administrateur de la plateforme. Réponds de façon claire, concise et " +
+  "utile, en français sauf si on te parle dans une autre langue. Tu n'as " +
+  "accès à aucune donnée de la plateforme (équipes, matchs, résultats) : " +
+  "précise-le si on te pose une question qui en aurait besoin.";
+
+/**
+ * Discussion libre avec l'IA (tchat admin). Assistant généraliste : ne
+ * consulte ni ne modifie aucune donnée de la plateforme.
+ */
+export async function chatCompletion(
+  history: ChatMessage[]
+): Promise<{ reply: string } | { error: string }> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    return {
+      error: "Aucune clé OPENROUTER_API_KEY configurée : le tchat IA n'est pas disponible.",
+    };
+  }
+
+  const model = process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
+  const messages: ChatMessage[] = [
+    { role: "system", content: CHAT_SYSTEM_PROMPT },
+    ...history.slice(-20), // limite le contexte envoyé au modèle
+  ];
+
+  try {
+    const reply = await callOpenRouterChat(apiKey, model, messages);
+    return { reply };
+  } catch (e) {
+    return {
+      error: `IA indisponible (${e instanceof Error ? e.message : "erreur"}).`,
+    };
+  }
+}

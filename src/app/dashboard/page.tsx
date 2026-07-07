@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ClipboardCheck, Settings, Users } from "lucide-react";
+import { Bot, ClipboardCheck, Settings, Users } from "lucide-react";
 import { requireAuth } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/app-shell";
@@ -86,6 +86,11 @@ export default async function DashboardPage() {
             </Button>
             <Button asChild size="sm" variant="outline">
               <Link href="/admin/maps">Pool de maps</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/admin/chat">
+                <Bot /> Tchat IA
+              </Link>
             </Button>
             <Button asChild size="sm" variant="outline">
               <Link href="/admin/settings">
