@@ -22,22 +22,29 @@ export const authOptions: NextAuthOptions = {
 
         const { email, password } = parsed.data;
 
-        const user = await prisma.user.findUnique({
-          where: { email },
-          include: { team: { select: { id: true } } },
-        });
-        if (!user || !user.passwordHash) return null;
+        try {
+          const user = await prisma.user.findUnique({
+            where: { email },
+            include: { team: { select: { id: true } } },
+          });
+          if (!user || !user.passwordHash) return null;
 
-        const valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) return null;
+          const valid = await bcrypt.compare(password, user.passwordHash);
+          if (!valid) return null;
 
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          teamId: user.team?.id ?? null,
-        };
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            teamId: user.team?.id ?? null,
+          };
+        } catch (e) {
+          // Base injoignable / tables manquantes : on log côté serveur pour
+          // le diagnostic (voir /api/health) et on échoue proprement.
+          console.error("authorize error", e);
+          return null;
+        }
       },
     }),
   ],
