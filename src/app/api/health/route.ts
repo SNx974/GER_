@@ -50,14 +50,18 @@ export async function GET() {
     } catch (e) {
       report.tables = "manquantes";
       report.tablesError =
-        e instanceof Error ? e.message.split("\n")[0] : String(e);
+        e instanceof Error
+          ? e.message.split("\n").find((l) => l.trim().length > 0) ?? e.message
+          : String(e);
       report.hint =
-        "Les tables n'existent pas : `prisma db push` n'a pas été exécuté. Sur Dokploy, le build doit utiliser le Dockerfile (l'entrypoint s'en charge au démarrage).";
+        "Les tables n'existent pas : `prisma db push` n'a pas été exécuté au démarrage.";
     }
   } catch (e) {
     report.database = "inaccessible";
     report.databaseError =
-      e instanceof Error ? e.message.split("\n")[0] : String(e);
+      e instanceof Error
+        ? e.message.split("\n").find((l) => l.trim().length > 0) ?? e.message
+        : String(e);
     report.hint =
       "Connexion à la base impossible : vérifier DATABASE_URL (l'URL interne ne fonctionne que si l'app est dans le même projet Dokploy que le service Postgres).";
   }

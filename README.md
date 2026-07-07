@@ -63,18 +63,22 @@ L'app tourne sur http://localhost:3000
 
 ## Déploiement (Dokploy)
 
-Le projet contient un `Dockerfile` et un `docker-entrypoint.sh` (qui applique
-`prisma db push` puis le seed avant de démarrer). Sur Dokploy :
+Le script `npm start` (`scripts/bootstrap-db.js` puis `next start`) applique
+`prisma db push` (avec retry si la base n'est pas encore prête) puis le seed
+avant de démarrer le serveur. Comme cette logique est branchée sur le script
+`start` de `package.json` — pas sur un entrypoint Docker séparé — elle
+s'exécute quelle que soit la commande de démarrage utilisée par la
+plateforme (Dockerfile ou détection automatique type Nixpacks).
 
 1. **Créer un service PostgreSQL** dans le projet, puis copier son *Internal Connection URL*.
-2. **Créer une application** depuis ce dépôt GitHub (build type : Dockerfile).
+2. **Créer une application** depuis ce dépôt GitHub (build type : Dockerfile recommandé).
 3. **Variables d'environnement** à définir :
 
    | Variable | Valeur |
    |---|---|
    | `DATABASE_URL` | l'*Internal Connection URL* du service Postgres |
    | `NEXTAUTH_SECRET` | un secret aléatoire (`openssl rand -base64 32`) |
-   | `NEXTAUTH_URL` | l'URL publique de l'app (ex : `https://ger.mondomaine.com`) |
+   | `NEXTAUTH_URL` | l'URL publique de l'app, **avec le protocole** (ex : `https://ger.mondomaine.com`) |
    | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | l'admin initial |
    | `GEMINI_API_KEY` | clé Google AI Studio (reconnaissance d'image) |
    | `GEMINI_MODEL` | `gemini-2.0-flash` (optionnel) |
@@ -82,4 +86,5 @@ Le projet contient un `Dockerfile` et un `docker-entrypoint.sh` (qui applique
 4. **Port** : l'app écoute sur `3000`.
 
 Au premier démarrage, les tables sont créées et l'admin + le pool de maps sont seedés
-automatiquement.
+automatiquement. En cas de doute sur la config, visiter `/api/health` : elle
+rapporte l'état des variables d'env, de la connexion DB, des tables et du seed.
