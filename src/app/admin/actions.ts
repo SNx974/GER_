@@ -8,7 +8,7 @@ import { auth } from "@/lib/session";
 import { getAdminContext } from "@/lib/guards";
 import { createAdminSchema, type CreateAdminInput } from "@/lib/validators/auth";
 import { mapSchema, type MapInput } from "@/lib/validators/map";
-import { POINTS_WIN, POINTS_LOSS } from "@/lib/constants";
+import { buildMatchImpactOps } from "@/lib/leaderboard-adjust";
 import { ok, fail, type ActionResult } from "@/lib/actions";
 
 export async function updateMaxPlayers(value: number): Promise<ActionResult> {
@@ -200,38 +200,14 @@ export async function deleteMatch(matchId: string): Promise<ActionResult> {
   const ops: Prisma.PrismaPromise<unknown>[] = [];
 
   if (match.status === "COMPLETED" && match.result?.status === "VALIDATED") {
-    const agg = await prisma.playerMatchStat.groupBy({
-      by: ["playerId"],
-      where: { matchMap: { matchId } },
-      _sum: { kills: true, deaths: true, assists: true },
+    const reverseOps = await buildMatchImpactOps({
+      matchId: match.id,
+      teamAId: match.teamAId,
+      teamBId: match.teamBId,
+      winnerId: match.winnerId,
+      sign: -1,
     });
-    for (const row of agg) {
-      ops.push(
-        prisma.player.update({
-          where: { id: row.playerId },
-          data: {
-            totalKills: { decrement: row._sum.kills ?? 0 },
-            totalDeaths: { decrement: row._sum.deaths ?? 0 },
-            totalAssists: { decrement: row._sum.assists ?? 0 },
-            matchesPlayed: { decrement: 1 },
-          },
-        })
-      );
-    }
-    if (match.winnerId) {
-      const loserId =
-        match.winnerId === match.teamAId ? match.teamBId : match.teamAId;
-      ops.push(
-        prisma.team.update({
-          where: { id: match.winnerId },
-          data: { wins: { decrement: 1 }, points: { decrement: POINTS_WIN } },
-        }),
-        prisma.team.update({
-          where: { id: loserId },
-          data: { losses: { decrement: 1 }, points: { decrement: POINTS_LOSS } },
-        })
-      );
-    }
+    ops.push(...reverseOps);
   }
 
   ops.push(prisma.match.delete({ where: { id: matchId } }));

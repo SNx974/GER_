@@ -87,10 +87,10 @@ export default async function AdminMatchesPage() {
                     </Link>
                     {m.result && (
                       <Link
-                        href={`/match/${m.roomToken}/result`}
+                        href={`/admin/results/${m.id}`}
                         className="text-sm text-primary hover:underline"
                       >
-                        Résultat ({m.result.status})
+                        Résultat ({m.result.status}) — détail
                       </Link>
                     )}
                     <AdminMatchActions matchId={m.id} status={m.status} />

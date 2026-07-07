@@ -53,6 +53,9 @@ L'app tourne sur http://localhost:3000
 - [x] **5. Leaderboard** — classement équipes (points/V-D) + individuel (TOP KILLER)
 - [x] **6. Administration des matchs** — vue de tous les matchs (annuler/supprimer), minimum de joueurs
       requis pour jouer (réglage global)
+- [x] **7. Double soumission + arbitrage admin** — chaque équipe peut soumettre sa propre version du
+      résultat (screenshots + stats), comparées côte à côte ; l'admin a toujours le dernier mot et peut
+      corriger manuellement les stats officielles, même sur un résultat déjà validé (classement recalculé)
 
 ## Notes techniques
 

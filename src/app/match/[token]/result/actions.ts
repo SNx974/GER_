@@ -1,20 +1,24 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/session";
-import { getCaptainContext } from "@/lib/guards";
+import { getCaptainContext, getAdminContext } from "@/lib/guards";
 import { notify, notifyAdmins } from "@/lib/notifications";
 import { analyzeResult, type MapStatInput } from "@/lib/ai";
-import { POINTS_WIN, POINTS_LOSS } from "@/lib/constants";
+import { buildMatchImpactOps } from "@/lib/leaderboard-adjust";
 import {
   submitResultSchema,
+  mapResultSchema,
   type SubmitResultValues,
+  type MapResultValues,
+  type SubmissionSnapshot,
 } from "@/lib/validators/result";
 import { ok, fail, type ActionResult } from "@/lib/actions";
 
-// ─── Soumission d'un résultat ───
+// ─── Soumission d'un résultat (chaque équipe peut soumettre la sienne) ───
 
 export async function submitResult(
   token: string,
@@ -32,7 +36,7 @@ export async function submitResult(
     where: { roomToken: token },
     include: {
       maps: { select: { id: true } },
-      result: { select: { id: true } },
+      result: true,
       teamA: {
         select: { id: true, captainId: true, players: { select: { id: true } } },
       },
@@ -49,7 +53,18 @@ export async function submitResult(
   if (match.status !== "READY") {
     return fail("Le résultat ne peut être soumis qu'une fois le mapban terminé.");
   }
-  if (match.result) return fail("Un résultat a déjà été soumis pour ce match.");
+
+  const isTeamA = ctx.teamId === match.teamAId;
+  const alreadySubmitted = match.result
+    ? isTeamA
+      ? match.result.teamASubmission
+      : match.result.teamBSubmission
+    : null;
+  if (alreadySubmitted) {
+    return fail(
+      "Votre équipe a déjà soumis un résultat pour ce match. Un administrateur peut le modifier si besoin."
+    );
+  }
 
   // Cohérence des maps et des joueurs
   const validMapIds = new Set(match.maps.map((m) => m.id));
@@ -69,22 +84,7 @@ export async function submitResult(
     }
   }
 
-  // Calcul des scores de série (maps gagnées) + issue par map
-  let seriesScoreA = 0;
-  let seriesScoreB = 0;
-  const mapUpdates = parsed.data.maps.map((map) => {
-    let winnerId: string | null = null;
-    if (map.scoreA > map.scoreB) {
-      winnerId = match.teamAId;
-      seriesScoreA++;
-    } else if (map.scoreB > map.scoreA) {
-      winnerId = match.teamBId;
-      seriesScoreB++;
-    }
-    return { ...map, winnerId };
-  });
-
-  // Analyse IA (hors transaction : appel externe)
+  // Analyse IA sur cette soumission (hors transaction : appel externe)
   const aiInput: MapStatInput[] = parsed.data.maps.map((m, i) => ({
     mapName: `Map ${i + 1}`,
     scoreA: m.scoreA,
@@ -93,65 +93,124 @@ export async function submitResult(
   }));
   const ai = await analyzeResult(parsed.data.screenshots, aiInput);
 
-  const submitterIsA = ctx.teamId === match.teamAId;
+  const snapshot: SubmissionSnapshot = {
+    submittedAt: new Date().toISOString(),
+    screenshots: parsed.data.screenshots,
+    maps: parsed.data.maps,
+  };
 
-  // Écriture atomique : maps + stats + résultat
-  const ops: Prisma.PrismaPromise<unknown>[] = [];
-  for (const map of mapUpdates) {
+  if (!match.result) {
+    // Première soumission pour ce match : devient la version officielle.
+    let seriesScoreA = 0;
+    let seriesScoreB = 0;
+    const mapUpdates = parsed.data.maps.map((map) => {
+      let winnerId: string | null = null;
+      if (map.scoreA > map.scoreB) {
+        winnerId = match.teamAId;
+        seriesScoreA++;
+      } else if (map.scoreB > map.scoreA) {
+        winnerId = match.teamBId;
+        seriesScoreB++;
+      }
+      return { ...map, winnerId };
+    });
+
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
+    for (const map of mapUpdates) {
+      ops.push(
+        prisma.matchMap.update({
+          where: { id: map.matchMapId },
+          data: {
+            scoreTeamA: map.scoreA,
+            scoreTeamB: map.scoreB,
+            winnerId: map.winnerId,
+          },
+        })
+      );
+      if (map.stats.length > 0) {
+        ops.push(
+          prisma.playerMatchStat.createMany({
+            data: map.stats.map((s) => ({
+              matchMapId: map.matchMapId,
+              playerId: s.playerId,
+              kills: s.kills,
+              deaths: s.deaths,
+              assists: s.assists,
+              score: s.score,
+            })),
+          })
+        );
+      }
+    }
     ops.push(
-      prisma.matchMap.update({
-        where: { id: map.matchMapId },
+      prisma.matchResult.create({
         data: {
-          scoreTeamA: map.scoreA,
-          scoreTeamB: map.scoreB,
-          winnerId: map.winnerId,
+          matchId: match.id,
+          submittedByTeamId: ctx.teamId,
+          seriesScoreA,
+          seriesScoreB,
+          screenshots: parsed.data.screenshots,
+          teamASubmission: isTeamA
+            ? (snapshot as unknown as Prisma.InputJsonValue)
+            : undefined,
+          teamBSubmission: !isTeamA
+            ? (snapshot as unknown as Prisma.InputJsonValue)
+            : undefined,
+          aiAnalysis: ai as unknown as Prisma.InputJsonValue,
+          aiFlagged: ai.flagged,
+          aiSummary: ai.summary,
+          status: "PENDING",
+          teamAValidated: isTeamA,
+          teamBValidated: !isTeamA,
         },
       })
     );
-    if (map.stats.length > 0) {
-      ops.push(
-        prisma.playerMatchStat.createMany({
-          data: map.stats.map((s) => ({
-            matchMapId: map.matchMapId,
-            playerId: s.playerId,
-            kills: s.kills,
-            deaths: s.deaths,
-            assists: s.assists,
-            score: s.score,
-          })),
-        })
-      );
-    }
-  }
-  ops.push(
-    prisma.matchResult.create({
+
+    await prisma.$transaction(ops);
+
+    const opponentCaptainId = isTeamA
+      ? match.teamB.captainId
+      : match.teamA.captainId;
+    await notify(opponentCaptainId, "RESULT_SUBMITTED", { token });
+    await notifyAdmins("RESULT_SUBMITTED", { token, aiFlagged: ai.flagged });
+  } else {
+    // Deuxième soumission (l'autre équipe) : enregistrée pour comparaison,
+    // sans écraser les valeurs officielles déjà en place — c'est à l'admin
+    // de trancher si les deux versions divergent (voir /admin/results).
+    const currentMaps = await prisma.matchMap.findMany({
+      where: { matchId: match.id },
+      select: { id: true, scoreTeamA: true, scoreTeamB: true },
+    });
+    const differs = parsed.data.maps.some((m) => {
+      const current = currentMaps.find((c) => c.id === m.matchMapId);
+      return !current || current.scoreTeamA !== m.scoreA || current.scoreTeamB !== m.scoreB;
+    });
+
+    const alreadyValidated = match.result.status === "VALIDATED";
+
+    await prisma.matchResult.update({
+      where: { id: match.result.id },
       data: {
-        matchId: match.id,
-        submittedByTeamId: ctx.teamId,
-        seriesScoreA,
-        seriesScoreB,
-        screenshots: parsed.data.screenshots,
-        aiAnalysis: ai as unknown as Prisma.InputJsonValue,
-        aiFlagged: ai.flagged,
-        aiSummary: ai.summary,
-        status: "PENDING",
-        teamAValidated: submitterIsA,
-        teamBValidated: !submitterIsA,
+        [isTeamA ? "teamASubmission" : "teamBSubmission"]:
+          snapshot as unknown as Prisma.InputJsonValue,
+        screenshots: Array.from(
+          new Set([...match.result.screenshots, ...parsed.data.screenshots])
+        ).slice(0, 20),
+        status:
+          differs && !alreadyValidated ? "DISPUTED" : match.result.status,
       },
-    })
-  );
+    });
 
-  await prisma.$transaction(ops);
-
-  // Notifie l'équipe adverse + les admins
-  const opponentCaptainId = submitterIsA
-    ? match.teamB.captainId
-    : match.teamA.captainId;
-  await notify(opponentCaptainId, "RESULT_SUBMITTED", { token });
-  await notifyAdmins("RESULT_SUBMITTED", { token, aiFlagged: ai.flagged });
+    await notifyAdmins("RESULT_SUBMITTED", {
+      token,
+      secondSubmission: true,
+      differs,
+    });
+  }
 
   revalidatePath(`/match/${token}/result`);
   revalidatePath(`/match/${token}`);
+  revalidatePath("/admin/results");
   return ok();
 }
 
@@ -173,9 +232,6 @@ export async function validateResult(
     },
   });
   if (!match || !match.result) return fail("Résultat introuvable.");
-  if (match.result.status === "VALIDATED") {
-    return fail("Ce résultat est déjà validé.");
-  }
 
   const isAdmin = session.user.role === "ADMIN";
   const myTeamId = session.user.teamId;
@@ -186,6 +242,17 @@ export async function validateResult(
 
   if (!isAdmin && !isParticipantCaptain) {
     return fail("Vous n'êtes pas autorisé à valider ce résultat.");
+  }
+  // Un résultat déjà validé ne peut plus être re-validé ici, y compris par
+  // un admin (sinon l'impact sur le classement serait appliqué deux fois) :
+  // pour corriger un résultat déjà validé, l'admin doit utiliser
+  // « Modifier » (adminUpdateResult), qui annule puis réapplique l'impact.
+  if (match.result.status === "VALIDATED") {
+    return fail(
+      isAdmin
+        ? "Ce résultat est déjà validé. Utilisez « Modifier » pour corriger les stats si nécessaire."
+        : "Ce résultat est déjà validé."
+    );
   }
 
   // Litige : bascule en DISPUTED et alerte les admins
@@ -199,7 +266,7 @@ export async function validateResult(
     return ok();
   }
 
-  // Un admin valide directement
+  // Un admin valide directement : c'est toujours l'admin qui a le dernier mot.
   if (isAdmin) {
     await finalizeResult(matchId, session.user.id);
     return ok();
@@ -209,10 +276,14 @@ export async function validateResult(
   const teamAValidated = isA ? true : match.result.teamAValidated;
   const teamBValidated = isB ? true : match.result.teamBValidated;
 
-  // Si l'IA a signalé une anomalie, l'accord des capitaines ne suffit pas :
-  // un admin doit obligatoirement trancher (le résultat reste PENDING).
+  // L'accord des deux capitaines ne suffit pas si l'IA a signalé une
+  // anomalie OU si les deux équipes ont soumis des versions divergentes :
+  // un admin doit alors obligatoirement trancher (le résultat reste PENDING).
   const bothAgree = teamAValidated && teamBValidated;
-  if (bothAgree && !match.result.aiFlagged) {
+  const canAutoFinalize =
+    bothAgree && !match.result.aiFlagged && match.result.status !== "DISPUTED";
+
+  if (canAutoFinalize) {
     await finalizeResult(matchId, null);
   } else {
     await prisma.matchResult.update({
@@ -227,7 +298,7 @@ export async function validateResult(
 /**
  * Rejet d'un résultat par un admin : supprime le résultat et les stats
  * associées, réinitialise les scores des maps, et laisse le match en READY
- * pour permettre une nouvelle soumission.
+ * pour permettre une nouvelle soumission des deux équipes.
  */
 export async function rejectResult(matchId: string): Promise<ActionResult> {
   const session = await auth();
@@ -238,35 +309,55 @@ export async function rejectResult(matchId: string): Promise<ActionResult> {
   const match = await prisma.match.findUnique({
     where: { id: matchId },
     include: {
-      result: { select: { id: true } },
+      result: { select: { id: true, status: true } },
       maps: { select: { id: true } },
       teamA: { select: { captainId: true } },
       teamB: { select: { captainId: true } },
     },
   });
   if (!match || !match.result) return fail("Résultat introuvable.");
-  if (match.status === "COMPLETED") {
-    return fail("Un match validé ne peut plus être rejeté.");
+
+  const ops: Prisma.PrismaPromise<unknown>[] = [];
+
+  // Si le résultat était déjà validé, on annule d'abord son impact sur le
+  // classement avant de tout supprimer (admin a le dernier mot, y compris
+  // pour revenir sur une validation antérieure).
+  if (match.status === "COMPLETED" && match.result.status === "VALIDATED") {
+    const reverseOps = await buildMatchImpactOps({
+      matchId: match.id,
+      teamAId: match.teamAId,
+      teamBId: match.teamBId,
+      winnerId: match.winnerId,
+      sign: -1,
+    });
+    ops.push(...reverseOps);
+    ops.push(
+      prisma.match.update({
+        where: { id: match.id },
+        data: { status: "READY", winnerId: null },
+      })
+    );
   }
 
   const mapIds = match.maps.map((m) => m.id);
-
-  await prisma.$transaction([
-    prisma.playerMatchStat.deleteMany({
-      where: { matchMapId: { in: mapIds } },
-    }),
+  ops.push(
+    prisma.playerMatchStat.deleteMany({ where: { matchMapId: { in: mapIds } } }),
     prisma.matchMap.updateMany({
       where: { id: { in: mapIds } },
       data: { scoreTeamA: null, scoreTeamB: null, winnerId: null },
     }),
-    prisma.matchResult.delete({ where: { id: match.result.id } }),
-  ]);
+    prisma.matchResult.delete({ where: { id: match.result.id } })
+  );
+
+  await prisma.$transaction(ops);
 
   await notify(match.teamA.captainId, "RESULT_SUBMITTED", { matchId, rejected: true });
   await notify(match.teamB.captainId, "RESULT_SUBMITTED", { matchId, rejected: true });
 
   revalidatePath(`/match/${match.roomToken}/result`);
   revalidatePath("/admin/results");
+  revalidatePath("/admin/matches");
+  revalidatePath("/leaderboard");
   return ok();
 }
 
@@ -290,23 +381,18 @@ async function finalizeResult(
 
   const { seriesScoreA, seriesScoreB } = match.result;
   let winnerId: string | null = null;
-  let loserId: string | null = null;
-  if (seriesScoreA > seriesScoreB) {
-    winnerId = match.teamAId;
-    loserId = match.teamBId;
-  } else if (seriesScoreB > seriesScoreA) {
-    winnerId = match.teamBId;
-    loserId = match.teamAId;
-  }
+  if (seriesScoreA > seriesScoreB) winnerId = match.teamAId;
+  else if (seriesScoreB > seriesScoreA) winnerId = match.teamBId;
 
-  // Agrégation des stats joueurs sur ce match
-  const agg = await prisma.playerMatchStat.groupBy({
-    by: ["playerId"],
-    where: { matchMap: { matchId } },
-    _sum: { kills: true, deaths: true, assists: true },
+  const impactOps = await buildMatchImpactOps({
+    matchId,
+    teamAId: match.teamAId,
+    teamBId: match.teamBId,
+    winnerId,
+    sign: 1,
   });
 
-  const ops: Prisma.PrismaPromise<unknown>[] = [
+  await prisma.$transaction([
     prisma.matchResult.update({
       where: { id: match.result.id },
       data: {
@@ -321,40 +407,127 @@ async function finalizeResult(
       where: { id: matchId },
       data: { status: "COMPLETED", winnerId },
     }),
-  ];
-
-  if (winnerId && loserId) {
-    ops.push(
-      prisma.team.update({
-        where: { id: winnerId },
-        data: { wins: { increment: 1 }, points: { increment: POINTS_WIN } },
-      }),
-      prisma.team.update({
-        where: { id: loserId },
-        data: { losses: { increment: 1 }, points: { increment: POINTS_LOSS } },
-      })
-    );
-  }
-
-  for (const row of agg) {
-    ops.push(
-      prisma.player.update({
-        where: { id: row.playerId },
-        data: {
-          totalKills: { increment: row._sum.kills ?? 0 },
-          totalDeaths: { increment: row._sum.deaths ?? 0 },
-          totalAssists: { increment: row._sum.assists ?? 0 },
-          matchesPlayed: { increment: 1 },
-        },
-      })
-    );
-  }
-
-  await prisma.$transaction(ops);
+    ...impactOps,
+  ]);
 
   await notify(match.teamA.captainId, "RESULT_VALIDATED", { matchId });
   await notify(match.teamB.captainId, "RESULT_VALIDATED", { matchId });
 
   revalidatePath(`/match/${match.roomToken}/result`);
   revalidatePath("/leaderboard");
+}
+
+// ─── Modification manuelle par un admin (dernier mot) ───
+
+const adminEditSchema = z.array(mapResultSchema).min(1);
+
+/**
+ * Permet à un admin de corriger directement les scores/stats officiels
+ * d'un résultat, y compris s'il est déjà validé (auquel cas son impact sur
+ * le classement est annulé puis réappliqué avec les nouvelles valeurs).
+ */
+export async function adminUpdateResult(
+  matchId: string,
+  maps: MapResultValues[]
+): Promise<ActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  const parsed = adminEditSchema.safeParse(maps);
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Données invalides");
+  }
+
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: { result: true, maps: { select: { id: true } } },
+  });
+  if (!match || !match.result) return fail("Résultat introuvable.");
+
+  const validMapIds = new Set(match.maps.map((m) => m.id));
+  for (const map of parsed.data) {
+    if (!validMapIds.has(map.matchMapId)) {
+      return fail("Une des maps ne correspond pas à ce match.");
+    }
+  }
+
+  const wasValidated = match.result.status === "VALIDATED";
+
+  await prisma.$transaction(async (tx) => {
+    if (wasValidated) {
+      const reverseOps = await buildMatchImpactOps(
+        {
+          matchId,
+          teamAId: match.teamAId,
+          teamBId: match.teamBId,
+          winnerId: match.winnerId,
+          sign: -1,
+        },
+        tx
+      );
+      for (const op of reverseOps) await op;
+    }
+
+    let seriesScoreA = 0;
+    let seriesScoreB = 0;
+    for (const map of parsed.data) {
+      let mapWinnerId: string | null = null;
+      if (map.scoreA > map.scoreB) {
+        mapWinnerId = match.teamAId;
+        seriesScoreA++;
+      } else if (map.scoreB > map.scoreA) {
+        mapWinnerId = match.teamBId;
+        seriesScoreB++;
+      }
+
+      await tx.matchMap.update({
+        where: { id: map.matchMapId },
+        data: { scoreTeamA: map.scoreA, scoreTeamB: map.scoreB, winnerId: mapWinnerId },
+      });
+      await tx.playerMatchStat.deleteMany({ where: { matchMapId: map.matchMapId } });
+      if (map.stats.length > 0) {
+        await tx.playerMatchStat.createMany({
+          data: map.stats.map((s) => ({
+            matchMapId: map.matchMapId,
+            playerId: s.playerId,
+            kills: s.kills,
+            deaths: s.deaths,
+            assists: s.assists,
+            score: s.score,
+          })),
+        });
+      }
+    }
+
+    let newWinnerId: string | null = null;
+    if (seriesScoreA > seriesScoreB) newWinnerId = match.teamAId;
+    else if (seriesScoreB > seriesScoreA) newWinnerId = match.teamBId;
+
+    await tx.matchResult.update({
+      where: { id: match.result!.id },
+      data: { seriesScoreA, seriesScoreB, editedByAdmin: true },
+    });
+
+    if (wasValidated) {
+      await tx.match.update({ where: { id: matchId }, data: { winnerId: newWinnerId } });
+      const forwardOps = await buildMatchImpactOps(
+        {
+          matchId,
+          teamAId: match.teamAId,
+          teamBId: match.teamBId,
+          winnerId: newWinnerId,
+          sign: 1,
+        },
+        tx
+      );
+      for (const op of forwardOps) await op;
+    }
+  });
+
+  revalidatePath(`/match/${match.roomToken}/result`);
+  revalidatePath("/admin/results");
+  revalidatePath(`/admin/results/${matchId}`);
+  revalidatePath("/admin/matches");
+  revalidatePath("/leaderboard");
+  return ok();
 }

@@ -24,3 +24,10 @@ export const submitResultSchema = z.object({
 export type PlayerStatValues = z.infer<typeof playerStatSchema>;
 export type MapResultValues = z.infer<typeof mapResultSchema>;
 export type SubmitResultValues = z.infer<typeof submitResultSchema>;
+
+/** Snapshot brut de la soumission d'une équipe, conservé pour comparaison. */
+export type SubmissionSnapshot = {
+  submittedAt: string;
+  screenshots: string[];
+  maps: MapResultValues[];
+};

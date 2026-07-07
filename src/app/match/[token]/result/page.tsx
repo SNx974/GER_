@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { auth } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { AiAnalysisCard, type AiShape } from "@/components/ai-analysis-card";
+import { SubmissionCompare } from "@/app/admin/results/[matchId]/submission-compare";
+import type { SubmissionSnapshot } from "@/lib/validators/result";
 import { ResultForm } from "./result-form";
 import { ResultValidation } from "./result-validation";
 import { Badge } from "@/components/ui/badge";
@@ -21,13 +24,6 @@ const RESULT_STATUS: Record<string, { label: string; variant: "secondary" | "suc
   VALIDATED: { label: "Validé", variant: "success" },
   DISPUTED: { label: "Contesté", variant: "destructive" },
   REJECTED: { label: "Rejeté", variant: "destructive" },
-};
-
-type AiShape = {
-  provider?: string;
-  summary?: string;
-  anomalies?: string[];
-  flagged?: boolean;
 };
 
 export default async function ResultPage({
@@ -77,6 +73,20 @@ export default async function ResultPage({
   const isAdmin = session?.user.role === "ADMIN";
 
   const result = match.result;
+  const teamASubmission = (result?.teamASubmission as SubmissionSnapshot | null) ?? null;
+  const teamBSubmission = (result?.teamBSubmission as SubmissionSnapshot | null) ?? null;
+
+  // Chaque capitaine peut soumettre sa propre version tant qu'il ne l'a pas
+  // déjà fait — la soumission de l'autre équipe ne bloque plus la sienne.
+  const myOwnSubmission = isA ? teamASubmission : isB ? teamBSubmission : undefined;
+  const canSubmitMyself =
+    isParticipantCaptain && match.status === "READY" && !myOwnSubmission;
+
+  const bothSubmitted = Boolean(teamASubmission && teamBSubmission);
+  const mapNames = Object.fromEntries(
+    match.maps.map((m, i) => [m.id, `Map ${i + 1} — ${m.map.name}`])
+  );
+  const allPlayers = [...match.teamA.players, ...match.teamB.players];
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-10">
@@ -93,39 +103,44 @@ export default async function ResultPage({
         </p>
       </div>
 
-      {/* Cas 1 : pas encore de résultat */}
-      {!result && (
-        <>
-          {match.status !== "READY" ? (
-            <Card>
-              <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                Le mapban doit être terminé avant de pouvoir soumettre un
-                résultat.
-              </CardContent>
-            </Card>
-          ) : isParticipantCaptain ? (
-            <ResultForm
-              token={params.token}
-              maps={match.maps.map((m) => ({
-                matchMapId: m.id,
-                mapName: m.map.name,
-                isDecider: m.isDecider,
-              }))}
-              teamA={{ name: match.teamA.name, players: match.teamA.players }}
-              teamB={{ name: match.teamB.name, players: match.teamB.players }}
-            />
-          ) : (
-            <Card>
-              <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                En attente de la soumission du résultat par l&apos;un des
-                capitaines.
-              </CardContent>
-            </Card>
-          )}
-        </>
+      {match.status !== "READY" && !result && (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            Le mapban doit être terminé avant de pouvoir soumettre un résultat.
+          </CardContent>
+        </Card>
       )}
 
-      {/* Cas 2 : résultat soumis */}
+      {/* Formulaire de soumission : visible tant que CE capitaine n'a pas
+          encore soumis sa propre version, même si l'autre équipe l'a déjà fait. */}
+      {canSubmitMyself && (
+        <ResultForm
+          token={params.token}
+          maps={match.maps.map((m) => ({
+            matchMapId: m.id,
+            mapName: m.map.name,
+            isDecider: m.isDecider,
+          }))}
+          teamA={{ name: match.teamA.name, players: match.teamA.players }}
+          teamB={{ name: match.teamB.name, players: match.teamB.players }}
+        />
+      )}
+
+      {!result && !isParticipantCaptain && (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            En attente de la soumission du résultat par l&apos;une des équipes.
+          </CardContent>
+        </Card>
+      )}
+
+      {isParticipantCaptain && match.status === "READY" && myOwnSubmission && (
+        <p className="text-sm text-muted-foreground">
+          Vous avez déjà soumis votre résultat pour ce match.
+        </p>
+      )}
+
+      {/* Résultat officiel */}
       {result && (
         <div className="space-y-6">
           <Card>
@@ -135,11 +150,16 @@ export default async function ResultPage({
                   {match.teamA.name} {result.seriesScoreA} – {result.seriesScoreB}{" "}
                   {match.teamB.name}
                 </CardTitle>
-                <CardDescription>Score de la série</CardDescription>
+                <CardDescription>Score officiel de la série</CardDescription>
               </div>
-              <Badge variant={(RESULT_STATUS[result.status] ?? RESULT_STATUS.PENDING!).variant}>
-                {(RESULT_STATUS[result.status] ?? RESULT_STATUS.PENDING!).label}
-              </Badge>
+              <div className="flex flex-col items-end gap-1">
+                <Badge variant={(RESULT_STATUS[result.status] ?? RESULT_STATUS.PENDING!).variant}>
+                  {(RESULT_STATUS[result.status] ?? RESULT_STATUS.PENDING!).label}
+                </Badge>
+                {result.editedByAdmin && (
+                  <Badge variant="secondary">Corrigé par un admin</Badge>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               {match.maps.map((m, i) => (
@@ -160,8 +180,25 @@ export default async function ResultPage({
             </CardContent>
           </Card>
 
+          {!bothSubmitted && (teamASubmission || teamBSubmission) && (
+            <p className="text-sm text-muted-foreground">
+              En attente de la soumission de l&apos;autre équipe pour comparer
+              les deux versions.
+            </p>
+          )}
+          {bothSubmitted && (
+            <SubmissionCompare
+              teamAName={match.teamA.name}
+              teamBName={match.teamB.name}
+              teamASubmission={teamASubmission}
+              teamBSubmission={teamBSubmission}
+              players={allPlayers}
+              mapNames={mapNames}
+            />
+          )}
+
           {/* Analyse IA */}
-          <AiCard ai={result.aiAnalysis as AiShape | null} flagged={result.aiFlagged} />
+          <AiAnalysisCard ai={result.aiAnalysis as AiShape | null} flagged={result.aiFlagged} />
 
           {/* Screenshots */}
           {result.screenshots.length > 0 && (
@@ -196,7 +233,8 @@ export default async function ResultPage({
               <CardTitle className="text-base">Validation</CardTitle>
               <CardDescription>
                 Le résultat est comptabilisé une fois validé par les deux
-                capitaines ou par un administrateur.
+                capitaines, ou à tout moment par un administrateur (dernier
+                mot).
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -211,6 +249,12 @@ export default async function ResultPage({
                   administrateur est requise pour comptabiliser ce résultat.
                 </p>
               )}
+              {result.status === "DISPUTED" && !result.aiFlagged && (
+                <p className="text-sm text-destructive">
+                  ⚠️ Les deux équipes ont soumis des versions différentes : un
+                  administrateur doit trancher.
+                </p>
+              )}
 
               {result.status !== "VALIDATED" && (
                 <ResultValidation
@@ -222,6 +266,14 @@ export default async function ResultPage({
                         (isB && !result.teamBValidated)))
                   }
                 />
+              )}
+              {isAdmin && (
+                <Link
+                  href={`/admin/results/${match.id}`}
+                  className="inline-block text-sm text-primary hover:underline"
+                >
+                  Ouvrir le détail admin (modifier les stats)
+                </Link>
               )}
             </CardContent>
           </Card>
@@ -241,35 +293,5 @@ function ValidationTag({ label, ok }: { label: string; ok: boolean }) {
       )}
       {label} : {ok ? "validé" : "en attente"}
     </span>
-  );
-}
-
-function AiCard({ ai, flagged }: { ai: AiShape | null; flagged: boolean }) {
-  return (
-    <Card className={flagged ? "border-destructive/50" : undefined}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          Analyse IA
-          {flagged ? (
-            <Badge variant="destructive">Anomalies détectées</Badge>
-          ) : (
-            <Badge variant="success">RAS</Badge>
-          )}
-        </CardTitle>
-        {ai?.provider && (
-          <CardDescription>Moteur : {ai.provider}</CardDescription>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        <p>{ai?.summary ?? "Analyse indisponible."}</p>
-        {ai?.anomalies && ai.anomalies.length > 0 && (
-          <ul className="list-inside list-disc text-muted-foreground">
-            {ai.anomalies.map((a, i) => (
-              <li key={i}>{a}</li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
   );
 }

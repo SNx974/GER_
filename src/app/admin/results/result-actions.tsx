@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Check, ExternalLink, X } from "lucide-react";
+import { Check, ExternalLink, Pencil, X } from "lucide-react";
 import { validateResult } from "@/app/match/[token]/result/actions";
 import { rejectResult } from "@/app/match/[token]/result/actions";
 import { Button } from "@/components/ui/button";
@@ -44,9 +44,14 @@ export function AdminResultActions({
       <Button size="sm" variant="outline" onClick={reject} disabled={pending}>
         <X /> Rejeter
       </Button>
+      <Button asChild size="sm" variant="secondary">
+        <Link href={`/admin/results/${matchId}`}>
+          <Pencil /> Détail / Modifier
+        </Link>
+      </Button>
       <Button asChild size="sm" variant="ghost">
         <Link href={`/match/${token}/result`}>
-          <ExternalLink /> Détails
+          <ExternalLink /> Vue capitaine
         </Link>
       </Button>
     </div>

@@ -317,9 +317,14 @@ model MatchResult {
   submittedByTeamId String
   submittedByTeam   Team @relation("SubmittingTeam", fields: [submittedByTeamId], references: [id])
 
-  seriesScoreA Int // maps gagnées par A
+  seriesScoreA Int // maps gagnées par A (valeurs OFFICIELLES, éditables par l'admin)
   seriesScoreB Int // maps gagnées par B
-  screenshots  String[]
+  screenshots  String[] // fusion des screenshots des deux équipes
+
+  // Snapshot brut de la soumission de chaque équipe (comparaison / détail admin).
+  // Non nul dès que l'équipe correspondante a soumis un résultat.
+  teamASubmission Json?
+  teamBSubmission Json?
 
   aiAnalysis Json?
   aiFlagged  Boolean @default(false)
@@ -331,6 +336,7 @@ model MatchResult {
   validatedById  String?
   validatedBy    User?        @relation("AdminValidator", fields: [validatedById], references: [id])
   validatedAt    DateTime?
+  editedByAdmin  Boolean      @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
