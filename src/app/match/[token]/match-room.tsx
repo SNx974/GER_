@@ -35,7 +35,12 @@ export function MatchRoom({ token, initialState, viewerLetter }: Props) {
         /* ignore keep-alive / parsing */
       }
     };
-    es.onerror = () => es.close();
+    // Ne PAS fermer la connexion ici : EventSource retente automatiquement
+    // sa connexion après une erreur réseau/proxy. La fermer forçait un
+    // rechargement manuel de la page pour retrouver le temps réel.
+    es.onerror = () => {
+      /* le navigateur gère la reconnexion automatique */
+    };
     return () => es.close();
   }, [token]);
 

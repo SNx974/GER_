@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
+import { mkdir, rm, writeFile } from "fs/promises";
+import path from "path";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
+
+const UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
 /**
  * Diagnostic de déploiement : GET /api/health
@@ -45,7 +50,7 @@ export async function GET() {
       };
       if (admins === 0) {
         report.hint =
-          "Aucun admin en base : le seed n'a pas tourné. Vérifier que le build utilise le Dockerfile (docker-entrypoint.sh) et que ADMIN_EMAIL/ADMIN_PASSWORD sont définis.";
+          "Aucun admin en base : le seed n'a pas tourné. Vérifier que ADMIN_EMAIL/ADMIN_PASSWORD sont définis et que `npm start` (scripts/bootstrap-db.js) s'exécute bien au démarrage.";
       }
     } catch (e) {
       report.tables = "manquantes";
@@ -64,6 +69,21 @@ export async function GET() {
         : String(e);
     report.hint =
       "Connexion à la base impossible : vérifier DATABASE_URL (l'URL interne ne fonctionne que si l'app est dans le même projet Dokploy que le service Postgres).";
+  }
+
+  // Vérifie que le dossier des screenshots est réellement accessible en
+  // écriture (cause fréquente de 500 sur /api/upload si non monté/permissions).
+  try {
+    await mkdir(UPLOAD_DIR, { recursive: true });
+    const testFile = path.join(UPLOAD_DIR, `.healthcheck-${randomUUID()}`);
+    await writeFile(testFile, "ok");
+    await rm(testFile);
+    report.uploads = "ok";
+  } catch (e) {
+    report.uploads = "non accessible en écriture";
+    report.uploadsError = e instanceof Error ? e.message : String(e);
+    report.uploadsHint =
+      "Le dossier /app/uploads n'est pas accessible en écriture. Monter un volume Dokploy sur ce chemin, ou vérifier les permissions du conteneur.";
   }
 
   const ok =

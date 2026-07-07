@@ -49,11 +49,23 @@ export async function POST(req: Request) {
     );
   }
 
-  await mkdir(UPLOAD_DIR, { recursive: true });
+  try {
+    await mkdir(UPLOAD_DIR, { recursive: true });
 
-  const filename = `${randomUUID()}.${ext}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(path.join(UPLOAD_DIR, filename), buffer);
+    const filename = `${randomUUID()}.${ext}`;
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await writeFile(path.join(UPLOAD_DIR, filename), buffer);
 
-  return NextResponse.json({ url: `/api/uploads/${filename}` }, { status: 201 });
+    return NextResponse.json({ url: `/api/uploads/${filename}` }, { status: 201 });
+  } catch (e) {
+    console.error("upload error", e);
+    return NextResponse.json(
+      {
+        error:
+          "Impossible d'écrire le fichier sur le serveur (voir /api/health pour diagnostiquer).",
+        detail: e instanceof Error ? e.message : String(e),
+      },
+      { status: 500 }
+    );
+  }
 }
