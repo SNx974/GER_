@@ -46,7 +46,14 @@ export function AvailabilityManager({ items }: { items: AvailabilityRow[] }) {
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const res = await addAvailability(form);
+      // cf. propose-dialog.tsx : conversion en ISO côté navigateur pour ne
+      // pas laisser le serveur réinterpréter l'heure dans son propre fuseau.
+      const payload = {
+        ...form,
+        startTime: new Date(form.startTime).toISOString(),
+        endTime: new Date(form.endTime).toISOString(),
+      };
+      const res = await addAvailability(payload);
       if (!res.ok) {
         setError(res.error);
         return;

@@ -32,7 +32,15 @@ export function ProposeDialog({ opponents }: { opponents: OpponentOption[] }) {
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const res = await createProposal(form);
+      // Le champ datetime-local renvoie une heure "naïve" (sans fuseau).
+      // On la convertit en ISO ici, dans le navigateur, qui connaît le vrai
+      // fuseau de l'utilisateur — sinon le serveur la réinterprète dans le
+      // sien (souvent UTC), ce qui décale l'heure du match.
+      const payload = {
+        ...form,
+        proposedDate: new Date(form.proposedDate).toISOString(),
+      };
+      const res = await createProposal(payload);
       if (!res.ok) {
         setError(res.error);
         return;
