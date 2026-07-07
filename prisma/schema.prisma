@@ -1,0 +1,378 @@
+// ─────────────────────────────────────────────────────────────
+// GER ESPORT MANAGER — schéma Prisma (PostgreSQL)
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// 1. AUTHENTIFICATION & RÔLES
+// ─────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  CAPTAIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  image         String?
+  role          Role      @default(CAPTAIN)
+  emailVerified DateTime?
+
+  // Un admin peut créer d'autres admins → traçabilité
+  createdById   String?
+  createdBy     User?     @relation("AdminCreation", fields: [createdById], references: [id])
+  createdAdmins User[]    @relation("AdminCreation")
+
+  // Un capitaine possède exactement une équipe
+  team          Team?
+
+  accounts         Account[]
+  sessions         Session[]
+  notifications    Notification[]
+  validatedResults MatchResult[]  @relation("AdminValidator")
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+// --- Modèles standards NextAuth (prêts pour un futur OAuth) ---
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────
+// 2. ÉQUIPE & JOUEURS
+// ─────────────────────────────────────────────
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  tag         String?  @unique
+  logoUrl     String?
+  description String?  @db.Text
+
+  captainId   String   @unique
+  captain     User     @relation(fields: [captainId], references: [id], onDelete: Cascade)
+
+  players     Player[]
+
+  // Compteurs dénormalisés pour le leaderboard (recalculés à la validation)
+  points      Int      @default(0)
+  wins        Int      @default(0)
+  losses      Int      @default(0)
+
+  availabilities    Availability[]
+  proposalsSent     MatchProposal[] @relation("ProposingTeam")
+  proposalsReceived MatchProposal[] @relation("OpponentTeam")
+  matchesAsA        Match[]         @relation("TeamA")
+  matchesAsB        Match[]         @relation("TeamB")
+  matchesWon        Match[]         @relation("WinnerTeam")
+  mapbanActions     MapbanAction[]
+  resultsSubmitted  MatchResult[]   @relation("SubmittingTeam")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Player {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  pseudo    String
+  gameId    String?
+  role      String?
+  avatarUrl String?
+  isActive  Boolean  @default(true)
+
+  // Compteurs dénormalisés pour le TOP KILLER
+  totalKills    Int  @default(0)
+  totalDeaths   Int  @default(0)
+  totalAssists  Int  @default(0)
+  matchesPlayed Int  @default(0)
+
+  stats     PlayerMatchStat[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([teamId, pseudo])
+}
+
+// Paramètres globaux (singleton) modifiables par l'Admin
+model GlobalSetting {
+  id                String   @id @default("global")
+  maxPlayersPerTeam Int      @default(7)
+  updatedAt         DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// 3. PLANNING & PROPOSITIONS DE MATCH
+// ─────────────────────────────────────────────
+
+enum AvailabilityStatus {
+  AVAILABLE
+  UNAVAILABLE
+}
+
+model Availability {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  startTime DateTime
+  endTime   DateTime
+  status    AvailabilityStatus @default(AVAILABLE)
+  note      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([teamId, startTime])
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  REFUSED
+  CANCELLED
+}
+
+model MatchProposal {
+  id              String   @id @default(cuid())
+  proposingTeamId String
+  proposingTeam   Team     @relation("ProposingTeam", fields: [proposingTeamId], references: [id], onDelete: Cascade)
+  opponentTeamId  String
+  opponentTeam    Team     @relation("OpponentTeam", fields: [opponentTeamId], references: [id], onDelete: Cascade)
+
+  proposedDate    DateTime
+  format          MatchFormat @default(BO1)
+  message         String?
+  status          ProposalStatus @default(PENDING)
+
+  match           Match?
+
+  createdAt       DateTime @default(now())
+  respondedAt     DateTime?
+
+  @@index([opponentTeamId, status])
+}
+
+// ─────────────────────────────────────────────
+// 4. MATCH & MAPBAN
+// ─────────────────────────────────────────────
+
+enum MatchStatus {
+  SCHEDULED // date validée, en attente de l'heure
+  MAPBAN    // salle ouverte, veto en cours
+  READY     // maps choisies, prêt à jouer
+  COMPLETED // résultat validé
+  CANCELLED
+}
+
+enum MatchFormat {
+  BO1
+  BO3
+  BO5
+}
+
+model GameMap {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  imageUrl String?
+  isActive Boolean @default(true) // fait partie du pool actuel
+
+  mapbanActions MapbanAction[]
+  playedIn      MatchMap[]     @relation("PlayedMap")
+}
+
+model Match {
+  id         String  @id @default(cuid())
+  proposalId String? @unique
+  proposal   MatchProposal? @relation(fields: [proposalId], references: [id])
+
+  teamAId    String
+  teamA      Team    @relation("TeamA", fields: [teamAId], references: [id])
+  teamBId    String
+  teamB      Team    @relation("TeamB", fields: [teamBId], references: [id])
+
+  scheduledAt DateTime
+  format      MatchFormat @default(BO1)
+  status      MatchStatus @default(SCHEDULED)
+
+  roomToken         String  @unique @default(cuid()) // lien unique de la Match Room
+  currentTurnTeamId String?                          // à qui de jouer dans le mapban
+
+  winnerId    String?
+  winner      Team?   @relation("WinnerTeam", fields: [winnerId], references: [id])
+
+  mapbanActions MapbanAction[]
+  maps          MatchMap[]     // maps de la série (1 pour BO1, jusqu'à 3/5)
+  result        MatchResult?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum MapbanActionType {
+  BAN
+  PICK
+}
+
+model MapbanAction {
+  id      String  @id @default(cuid())
+  matchId String
+  match   Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  teamId  String
+  team    Team    @relation(fields: [teamId], references: [id])
+  mapId   String
+  map     GameMap @relation(fields: [mapId], references: [id])
+
+  action  MapbanActionType
+  order   Int // ordre du tour (1, 2, 3...)
+
+  createdAt DateTime @default(now())
+
+  @@unique([matchId, order])
+  @@unique([matchId, mapId]) // une map ne peut être bannie/pick qu'une fois
+}
+
+// Une map effectivement jouée dans la série (score + stats par map)
+model MatchMap {
+  id             String  @id @default(cuid())
+  matchId        String
+  match          Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  mapId          String
+  map            GameMap @relation("PlayedMap", fields: [mapId], references: [id])
+
+  order          Int
+  isDecider      Boolean @default(false)
+  pickedByTeamId String? // équipe qui a pické cette map (null = decider)
+
+  scoreTeamA     Int?
+  scoreTeamB     Int?
+  winnerId       String?
+
+  playerStats    PlayerMatchStat[]
+
+  @@unique([matchId, order])
+}
+
+// ─────────────────────────────────────────────
+// 5. RÉSULTATS & ANALYSE IA
+// ─────────────────────────────────────────────
+
+enum ResultStatus {
+  PENDING   // soumis + analysé par IA, en attente de validation
+  VALIDATED
+  DISPUTED
+  REJECTED
+}
+
+model MatchResult {
+  id      String @id @default(cuid())
+  matchId String @unique
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  submittedByTeamId String
+  submittedByTeam   Team @relation("SubmittingTeam", fields: [submittedByTeamId], references: [id])
+
+  seriesScoreA Int // maps gagnées par A
+  seriesScoreB Int // maps gagnées par B
+  screenshots  String[]
+
+  aiAnalysis Json?
+  aiFlagged  Boolean @default(false)
+  aiSummary  String? @db.Text
+
+  status         ResultStatus @default(PENDING)
+  teamAValidated Boolean      @default(false)
+  teamBValidated Boolean      @default(false)
+  validatedById  String?
+  validatedBy    User?        @relation("AdminValidator", fields: [validatedById], references: [id])
+  validatedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PlayerMatchStat {
+  id         String   @id @default(cuid())
+  matchMapId String
+  matchMap   MatchMap @relation(fields: [matchMapId], references: [id], onDelete: Cascade)
+  playerId   String
+  player     Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  kills   Int @default(0)
+  deaths  Int @default(0)
+  assists Int @default(0)
+  score   Int @default(0) // ACS / combat score
+
+  @@unique([matchMapId, playerId])
+}
+
+// ─────────────────────────────────────────────
+// 6. NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+enum NotificationType {
+  PROPOSAL_RECEIVED
+  PROPOSAL_ACCEPTED
+  PROPOSAL_REFUSED
+  MATCH_READY
+  RESULT_SUBMITTED
+  RESULT_VALIDATED
+}
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type    NotificationType
+  payload Json?
+  read    Boolean          @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}

@@ -1,0 +1,2 @@
+# Garde les scripts shell en LF (sinon l'entrypoint échoue dans le conteneur Alpine)
+*.sh text eol=lf
