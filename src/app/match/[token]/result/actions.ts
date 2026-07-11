@@ -7,7 +7,6 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/session";
 import { getCaptainContext, getAdminContext } from "@/lib/guards";
 import { notify, notifyAdmins } from "@/lib/notifications";
-import { analyzeResult, type MapStatInput } from "@/lib/ai";
 import { buildMatchImpactOps } from "@/lib/leaderboard-adjust";
 import {
   submitResultSchema,
@@ -84,15 +83,6 @@ export async function submitResult(
     }
   }
 
-  // Analyse IA sur cette soumission (désactivée par défaut — voir isResultAnalysisEnabled)
-  const aiInput: MapStatInput[] = parsed.data.maps.map((m, i) => ({
-    mapName: `Map ${i + 1}`,
-    scoreA: m.scoreA,
-    scoreB: m.scoreB,
-    stats: m.stats,
-  }));
-  const ai = await analyzeResult(parsed.data.screenshots, aiInput);
-
   const snapshot: SubmissionSnapshot = {
     submittedAt: new Date().toISOString(),
     screenshots: parsed.data.screenshots,
@@ -160,9 +150,6 @@ export async function submitResult(
           teamBSubmission: !isTeamA
             ? (snapshot as unknown as Prisma.InputJsonValue)
             : undefined,
-          aiAnalysis: ai as unknown as Prisma.InputJsonValue,
-          aiFlagged: ai.flagged,
-          aiSummary: ai.summary,
           status: "PENDING",
           teamAValidated: isTeamA,
           teamBValidated: !isTeamA,
@@ -176,7 +163,7 @@ export async function submitResult(
       ? match.teamB.captainId
       : match.teamA.captainId;
     await notify(opponentCaptainId, "RESULT_SUBMITTED", { token });
-    await notifyAdmins("RESULT_SUBMITTED", { token, aiFlagged: ai.flagged });
+    await notifyAdmins("RESULT_SUBMITTED", { token });
   } else {
     // Deuxième soumission (l'autre équipe) : ajoute les stats de SES joueurs
     // (absentes jusqu'ici) et compare le score de map rapporté à celui déjà
@@ -274,32 +261,22 @@ export async function validateResult(
     return ok();
   }
 
-  // Un admin valide directement : c'est toujours l'admin qui a le dernier mot.
+  // Seul un admin peut finaliser un résultat — validation admin absolue,
+  // aucune auto-finalisation par simple accord des deux capitaines.
   if (isAdmin) {
     await finalizeResult(matchId, session.user.id);
     return ok();
   }
 
-  // Un capitaine valide son côté
+  // Un capitaine ne fait que confirmer son côté (signal informatif pour
+  // l'admin) — ça ne finalise jamais le résultat tout seul.
   const teamAValidated = isA ? true : match.result.teamAValidated;
   const teamBValidated = isB ? true : match.result.teamBValidated;
-
-  // L'accord des deux capitaines ne suffit pas si l'IA a signalé une
-  // anomalie OU si les deux équipes ont soumis des versions divergentes :
-  // un admin doit alors obligatoirement trancher (le résultat reste PENDING).
-  const bothAgree = teamAValidated && teamBValidated;
-  const canAutoFinalize =
-    bothAgree && !match.result.aiFlagged && match.result.status !== "DISPUTED";
-
-  if (canAutoFinalize) {
-    await finalizeResult(matchId, null);
-  } else {
-    await prisma.matchResult.update({
-      where: { id: match.result.id },
-      data: { teamAValidated, teamBValidated },
-    });
-    revalidatePath(`/match/${match.roomToken}/result`);
-  }
+  await prisma.matchResult.update({
+    where: { id: match.result.id },
+    data: { teamAValidated, teamBValidated },
+  });
+  revalidatePath(`/match/${match.roomToken}/result`);
   return ok();
 }
 

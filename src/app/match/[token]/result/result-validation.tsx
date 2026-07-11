@@ -9,9 +9,12 @@ import { Button } from "@/components/ui/button";
 export function ResultValidation({
   matchId,
   canValidate,
+  isAdmin = false,
 }: {
   matchId: string;
   canValidate: boolean;
+  /** Seul un admin finalise réellement le résultat ; un capitaine ne fait que confirmer son côté. */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -29,7 +32,7 @@ export function ResultValidation({
   return (
     <div className="flex gap-2">
       <Button onClick={() => act(true)} disabled={pending}>
-        <Check /> Valider le résultat
+        <Check /> {isAdmin ? "Valider le résultat" : "Confirmer mon résultat"}
       </Button>
       <Button variant="outline" onClick={() => act(false)} disabled={pending}>
         <AlertTriangle /> Contester

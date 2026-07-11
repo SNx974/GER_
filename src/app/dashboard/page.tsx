@@ -85,12 +85,18 @@ export default async function DashboardPage() {
               <Link href="/admin/matches">Tous les matchs</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
+              <Link href="/admin/assignments">Attribuer un match</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
               <Link href="/admin/maps">Pool de maps</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
               <Link href="/admin/rosters">
                 <Users /> Effectifs
               </Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/admin/users">Comptes</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
               <Link href="/admin/chat">

@@ -139,7 +139,29 @@ export async function sendMatchReminderEmail(params: {
   });
 }
 
-// ─── 4. Inscription / bienvenue ───
+// ─── 4. Réinitialisation de mot de passe ───
+
+export async function sendPasswordResetEmail(params: {
+  to: { email: string; name?: string };
+  resetUrl: string;
+}): Promise<void> {
+  await sendEmail({
+    to: [params.to],
+    subject: "Réinitialisation de votre mot de passe",
+    html: layout(
+      "Réinitialisation de mot de passe",
+      `<p>Une demande de réinitialisation de mot de passe a été effectuée pour
+       votre compte.</p>
+       <p><a href="${params.resetUrl}">Choisir un nouveau mot de passe</a></p>
+       <p style="font-size: 13px; color: #666;">
+         Ce lien expire dans 1 heure. Si vous n'êtes pas à l'origine de cette
+         demande, vous pouvez ignorer cet email.
+       </p>`
+    ),
+  });
+}
+
+// ─── 5. Inscription / bienvenue ───
 
 export async function sendRegistrationWelcomeEmail(params: {
   to: { email: string; name?: string };

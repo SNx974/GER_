@@ -13,6 +13,7 @@ import {
   type AvailabilityFormInput,
   type ProposalFormInput,
 } from "@/lib/validators/planning";
+import { proposeAssignmentDateSchema } from "@/lib/validators/assignment";
 import { ok, fail, type ActionResult } from "@/lib/actions";
 
 // ─── Disponibilités ───
@@ -260,5 +261,134 @@ export async function cancelProposal(proposalId: string): Promise<ActionResult> 
   if (res.count === 0) return fail("Proposition introuvable ou déjà traitée.");
 
   revalidatePath("/planning");
+  return ok();
+}
+
+// ─── Matchs attribués par l'admin (négociation d'une date dans une fenêtre) ───
+
+export async function proposeAssignmentDate(
+  input: { assignmentId: string; date: string }
+): Promise<ActionResult> {
+  const ctx = await getCaptainContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  const parsed = proposeAssignmentDateSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Données invalides");
+  }
+  const { assignmentId, date } = parsed.data;
+
+  const assignment = await prisma.matchAssignment.findUnique({
+    where: { id: assignmentId },
+    include: {
+      teamA: { select: { id: true, captainId: true, name: true } },
+      teamB: { select: { id: true, captainId: true, name: true } },
+    },
+  });
+  if (!assignment) return fail("Attribution introuvable.");
+  if (assignment.teamAId !== ctx.teamId && assignment.teamBId !== ctx.teamId) {
+    return fail("Ce match attribué ne concerne pas votre équipe.");
+  }
+  if (assignment.status !== "PENDING") {
+    return fail("Cette attribution n'est plus ouverte à la négociation.");
+  }
+  if (date.getTime() < assignment.windowStart.getTime() || date.getTime() > assignment.windowEnd.getTime()) {
+    return fail("La date doit être comprise dans la fenêtre proposée par l'admin.");
+  }
+
+  const isTeamA = ctx.teamId === assignment.teamAId;
+  const myTeam = isTeamA ? assignment.teamA : assignment.teamB;
+  const otherTeam = isTeamA ? assignment.teamB : assignment.teamA;
+
+  await prisma.matchAssignment.update({
+    where: { id: assignmentId },
+    data: { proposedDate: date, proposedByTeamId: ctx.teamId },
+  });
+
+  await notify(otherTeam.captainId, "ASSIGNMENT_DATE_PROPOSED", {
+    assignmentId,
+    byTeam: myTeam.name,
+  });
+
+  revalidatePath("/planning");
+  return ok();
+}
+
+/** Accepte la date actuellement proposée par l'AUTRE équipe → crée le match. */
+export async function acceptAssignmentDate(assignmentId: string): Promise<ActionResult> {
+  const ctx = await getCaptainContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  const assignment = await prisma.matchAssignment.findUnique({
+    where: { id: assignmentId },
+    include: {
+      teamA: {
+        select: { id: true, captainId: true, name: true, captain: { select: { email: true, name: true } } },
+      },
+      teamB: {
+        select: { id: true, captainId: true, name: true, captain: { select: { email: true, name: true } } },
+      },
+    },
+  });
+  if (!assignment) return fail("Attribution introuvable.");
+  if (assignment.teamAId !== ctx.teamId && assignment.teamBId !== ctx.teamId) {
+    return fail("Ce match attribué ne concerne pas votre équipe.");
+  }
+  if (assignment.status !== "PENDING") {
+    return fail("Cette attribution n'est plus ouverte à la négociation.");
+  }
+  if (!assignment.proposedDate || !assignment.proposedByTeamId) {
+    return fail("Aucune date n'a encore été proposée.");
+  }
+  if (assignment.proposedByTeamId === ctx.teamId) {
+    return fail("Vous ne pouvez pas accepter votre propre proposition.");
+  }
+
+  const minPlayers = await getMinPlayersToPlay();
+  const [aCount, bCount] = await Promise.all([
+    prisma.player.count({ where: { teamId: assignment.teamAId, isActive: true } }),
+    prisma.player.count({ where: { teamId: assignment.teamBId, isActive: true } }),
+  ]);
+  if (aCount < minPlayers || bCount < minPlayers) {
+    return fail(`Chaque équipe doit compter au moins ${minPlayers} joueur(s) actif(s) pour démarrer un match.`);
+  }
+
+  const conflict = await findConflict([assignment.teamAId, assignment.teamBId], assignment.proposedDate);
+  if (conflict) return fail(conflictMessage(conflict));
+
+  const match = await prisma.$transaction(async (tx) => {
+    const created = await tx.match.create({
+      data: {
+        teamAId: assignment.teamAId,
+        teamBId: assignment.teamBId,
+        scheduledAt: assignment.proposedDate!,
+        format: assignment.format,
+        status: "SCHEDULED",
+      },
+    });
+    await tx.matchAssignment.update({
+      where: { id: assignmentId },
+      data: { status: "AGREED", matchId: created.id },
+    });
+    return created;
+  });
+
+  await sendMatchConfirmedEmail({
+    to: [
+      { email: assignment.teamA.captain.email, name: assignment.teamA.captain.name ?? undefined },
+      { email: assignment.teamB.captain.email, name: assignment.teamB.captain.name ?? undefined },
+    ],
+    teamAName: assignment.teamA.name,
+    teamBName: assignment.teamB.name,
+    scheduledAt: assignment.proposedDate,
+    format: assignment.format,
+  });
+  await Promise.all([
+    notify(assignment.teamA.captainId, "ASSIGNMENT_AGREED", { matchId: match.id }),
+    notify(assignment.teamB.captainId, "ASSIGNMENT_AGREED", { matchId: match.id }),
+  ]);
+
+  revalidatePath("/planning");
+  revalidatePath("/matches");
   return ok();
 }

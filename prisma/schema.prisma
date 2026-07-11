@@ -37,10 +37,11 @@ model User {
   // Un capitaine possède exactement une équipe
   team          Team?
 
-  accounts         Account[]
-  sessions         Session[]
-  notifications    Notification[]
-  validatedResults MatchResult[]  @relation("AdminValidator")
+  accounts            Account[]
+  sessions            Session[]
+  notifications       Notification[]
+  validatedResults    MatchResult[]     @relation("AdminValidator")
+  createdAssignments  MatchAssignment[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -110,6 +111,9 @@ model Team {
   matchesWon        Match[]         @relation("WinnerTeam")
   mapbanActions     MapbanAction[]
   resultsSubmitted  MatchResult[]   @relation("SubmittingTeam")
+  assignmentsAsA      MatchAssignment[] @relation("AssignmentTeamA")
+  assignmentsAsB      MatchAssignment[] @relation("AssignmentTeamB")
+  assignmentsProposed MatchAssignment[] @relation("AssignmentProposedBy")
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -199,6 +203,50 @@ model MatchProposal {
   @@index([opponentTeamId, status])
 }
 
+enum AssignmentStatus {
+  PENDING   // en attente d'un accord entre les deux équipes sur une date
+  AGREED    // date trouvée, Match créé
+  ESCALATED // fenêtre expirée sans accord, admin doit intervenir
+  CANCELLED
+}
+
+// Match attribué par un admin entre deux équipes, avec une FENÊTRE de dates
+// (pas une heure fixe) — les équipes doivent se mettre d'accord sur une
+// date/heure précise à l'intérieur de cette fenêtre. Si la fenêtre expire
+// sans accord, le statut passe à ESCALATED et les admins sont notifiés
+// (voir /api/cron/match-reminders qui vérifie ça périodiquement).
+model MatchAssignment {
+  id      String @id @default(cuid())
+  teamAId String
+  teamA   Team   @relation("AssignmentTeamA", fields: [teamAId], references: [id], onDelete: Cascade)
+  teamBId String
+  teamB   Team   @relation("AssignmentTeamB", fields: [teamBId], references: [id], onDelete: Cascade)
+  format  MatchFormat @default(BO1)
+
+  windowStart DateTime
+  windowEnd   DateTime
+
+  status AssignmentStatus @default(PENDING)
+
+  // Proposition de date en cours (par l'une des deux équipes)
+  proposedDate     DateTime?
+  proposedByTeamId String?
+  proposedByTeam   Team?     @relation("AssignmentProposedBy", fields: [proposedByTeamId], references: [id])
+
+  matchId String? @unique
+  match   Match?  @relation(fields: [matchId], references: [id])
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  escalatedNotifiedAt DateTime? // évite de re-notifier les admins à chaque tick du cron
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, windowEnd])
+}
+
 // ─────────────────────────────────────────────
 // 4. MATCH & MAPBAN
 // ─────────────────────────────────────────────
@@ -252,6 +300,7 @@ model Match {
   mapbanActions MapbanAction[]
   maps          MatchMap[]     // maps de la série (1 pour BO1, jusqu'à 3/5)
   result        MatchResult?
+  assignment    MatchAssignment?
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -371,6 +420,10 @@ enum NotificationType {
   MATCH_READY
   RESULT_SUBMITTED
   RESULT_VALIDATED
+  ASSIGNMENT_CREATED
+  ASSIGNMENT_DATE_PROPOSED
+  ASSIGNMENT_AGREED
+  ASSIGNMENT_ESCALATED
 }
 
 model Notification {

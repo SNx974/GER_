@@ -5,6 +5,7 @@ import { AppShell } from "@/components/app-shell";
 import { AvailabilityManager } from "./availability-manager";
 import { ProposeDialog } from "./propose-dialog";
 import { ProposalsPanel } from "./proposals-panel";
+import { AssignmentsPanel, type AssignmentRow } from "./assignments-panel";
 import {
   Card,
   CardContent,
@@ -22,7 +23,7 @@ export default async function PlanningPage() {
   }
   const teamId = session.user.teamId;
 
-  const [availabilities, received, sent, opponents] = await Promise.all([
+  const [availabilities, received, sent, opponents, assignments] = await Promise.all([
     prisma.availability.findMany({
       where: { teamId },
       orderBy: { startTime: "asc" },
@@ -43,7 +44,29 @@ export default async function PlanningPage() {
       select: { id: true, name: true, tag: true },
       orderBy: { name: "asc" },
     }),
+    prisma.matchAssignment.findMany({
+      where: {
+        OR: [{ teamAId: teamId }, { teamBId: teamId }],
+        status: { in: ["PENDING", "ESCALATED"] },
+      },
+      include: {
+        teamA: { select: { name: true } },
+        teamB: { select: { name: true } },
+      },
+      orderBy: { windowStart: "asc" },
+    }),
   ]);
+
+  const assignmentRows: AssignmentRow[] = assignments.map((a) => ({
+    id: a.id,
+    opponentName: a.teamAId === teamId ? a.teamB.name : a.teamA.name,
+    format: a.format,
+    windowStart: a.windowStart.toISOString(),
+    windowEnd: a.windowEnd.toISOString(),
+    status: a.status,
+    proposedDate: a.proposedDate ? a.proposedDate.toISOString() : null,
+    proposedByMe: a.proposedByTeamId === teamId,
+  }));
 
   return (
     <AppShell>
@@ -57,6 +80,21 @@ export default async function PlanningPage() {
         </div>
         <ProposeDialog opponents={opponents} />
       </div>
+
+      {assignmentRows.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Matchs attribués par l&apos;admin</CardTitle>
+            <CardDescription>
+              Mettez-vous d&apos;accord avec l&apos;adversaire sur une date
+              dans la fenêtre proposée.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AssignmentsPanel assignments={assignmentRows} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

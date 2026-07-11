@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { auth } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { AiAnalysisCard, type AiShape } from "@/components/ai-analysis-card";
 import { SubmissionCompare } from "@/app/admin/results/[matchId]/submission-compare";
 import type { SubmissionSnapshot } from "@/lib/validators/result";
 import { ResultForm } from "./result-form";
@@ -202,9 +201,6 @@ export default async function ResultPage({
             />
           )}
 
-          {/* Analyse IA */}
-          <AiAnalysisCard ai={result.aiAnalysis as AiShape | null} flagged={result.aiFlagged} />
-
           {/* Screenshots */}
           {result.screenshots.length > 0 && (
             <Card>
@@ -237,9 +233,8 @@ export default async function ResultPage({
             <CardHeader>
               <CardTitle className="text-base">Validation</CardTitle>
               <CardDescription>
-                Le résultat est comptabilisé une fois validé par les deux
-                capitaines, ou à tout moment par un administrateur (dernier
-                mot).
+                Seul un administrateur peut valider définitivement un
+                résultat. La confirmation des capitaines est informative.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -248,13 +243,7 @@ export default async function ResultPage({
                 <ValidationTag label={match.teamB.name} ok={result.teamBValidated} />
               </div>
 
-              {result.status !== "VALIDATED" && result.aiFlagged && (
-                <p className="text-sm text-destructive">
-                  ⚠️ Anomalie détectée par l&apos;IA : la validation d&apos;un
-                  administrateur est requise pour comptabiliser ce résultat.
-                </p>
-              )}
-              {result.status === "DISPUTED" && !result.aiFlagged && (
+              {result.status === "DISPUTED" && (
                 <p className="text-sm text-destructive">
                   ⚠️ Les deux équipes ont soumis des versions différentes : un
                   administrateur doit trancher.
@@ -264,6 +253,7 @@ export default async function ResultPage({
               {result.status !== "VALIDATED" && (
                 <ResultValidation
                   matchId={match.id}
+                  isAdmin={isAdmin}
                   canValidate={
                     isAdmin ||
                     (!!isParticipantCaptain &&

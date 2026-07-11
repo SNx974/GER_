@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendMatchReminderEmail } from "@/lib/email";
+import { notifyAdmins } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -68,5 +69,38 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, checked: matches.length, sent });
+  // Escalade des matchs attribués dont la fenêtre de négociation a expiré
+  // sans accord entre les deux équipes.
+  const expired = await prisma.matchAssignment.findMany({
+    where: { status: "PENDING", windowEnd: { lt: new Date() }, escalatedNotifiedAt: null },
+    include: {
+      teamA: { select: { name: true } },
+      teamB: { select: { name: true } },
+    },
+  });
+
+  let escalated = 0;
+  for (const a of expired) {
+    try {
+      await prisma.matchAssignment.update({
+        where: { id: a.id },
+        data: { status: "ESCALATED", escalatedNotifiedAt: new Date() },
+      });
+      await notifyAdmins("ASSIGNMENT_ESCALATED", {
+        assignmentId: a.id,
+        teamA: a.teamA.name,
+        teamB: a.teamB.name,
+      });
+      escalated++;
+    } catch (e) {
+      console.error(`[cron] échec de l'escalade pour l'attribution ${a.id}`, e);
+    }
+  }
+
+  return NextResponse.json({
+    ok: true,
+    checked: matches.length,
+    sent,
+    escalated,
+  });
 }

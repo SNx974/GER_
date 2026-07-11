@@ -27,6 +27,16 @@ export function formatNotification(
       return "Un résultat de match a été soumis et attend validation.";
     case "RESULT_VALIDATED":
       return "Un résultat de match a été validé.";
+    case "ASSIGNMENT_CREATED":
+      return `Un admin a attribué un match contre ${
+        str(payload, "opponentTeam") ?? "une équipe"
+      } : trouvez une date dans la fenêtre proposée.`;
+    case "ASSIGNMENT_DATE_PROPOSED":
+      return `${str(payload, "byTeam") ?? "L'équipe adverse"} propose une date pour votre match attribué.`;
+    case "ASSIGNMENT_AGREED":
+      return "Une date a été trouvée pour votre match attribué : il est maintenant planifié.";
+    case "ASSIGNMENT_ESCALATED":
+      return "Un match attribué n'a pas trouvé de date à temps — signalé aux admins.";
     default:
       return "Notification.";
   }

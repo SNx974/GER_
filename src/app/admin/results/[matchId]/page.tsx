@@ -4,7 +4,6 @@ import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { requireRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/app-shell";
-import { AiAnalysisCard, type AiShape } from "@/components/ai-analysis-card";
 import { ResultValidation } from "@/app/match/[token]/result/result-validation";
 import type { SubmissionSnapshot } from "@/lib/validators/result";
 import { EditResultForm } from "./edit-result-form";
@@ -160,8 +159,6 @@ export default async function AdminResultDetailPage({
           mapNames={mapNames}
         />
 
-        <AiAnalysisCard ai={result.aiAnalysis as AiShape | null} flagged={result.aiFlagged} />
-
         {result.screenshots.length > 0 && (
           <Card>
             <CardHeader>
@@ -219,12 +216,13 @@ export default async function AdminResultDetailPage({
             <CardHeader>
               <CardTitle className="text-base">Décision finale</CardTitle>
               <CardDescription>
-                Votre validation est toujours prioritaire, quel que soit
-                l&apos;état des soumissions des capitaines.
+                Seul un administrateur peut valider définitivement ce
+                résultat, quel que soit l&apos;état des confirmations des
+                capitaines.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ResultValidation matchId={match.id} canValidate />
+              <ResultValidation matchId={match.id} canValidate isAdmin />
             </CardContent>
           </Card>
         )}

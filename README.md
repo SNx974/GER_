@@ -49,15 +49,15 @@ L'app tourne sur http://localhost:3000
 - [x] **2. Planning & propositions de match** — disponibilités, logique de conflit, propositions accept/refus, notifications
 - [x] **3. Mapban temps réel (Match Room)** — lien unique, veto tour par tour BO1/BO3/BO5 via SSE, récap decider
 - [x] **4. Résultats** — chaque équipe saisit manuellement le score et les stats de **ses propres
-      joueurs uniquement** (screenshot optionnel, à titre de preuve), analyse d'anomalies heuristique,
-      double validation + modération admin dédiée. L'analyse IA via screenshots existe mais est
-      désactivée par défaut (voir `AI_RESULT_ANALYSIS_ENABLED`)
+      joueurs uniquement** (screenshot optionnel, à titre de preuve). **Validation admin absolue** :
+      la confirmation des capitaines est informative, seul un admin finalise un résultat. L'analyse
+      IA via screenshots existe mais est désactivée par défaut (voir `AI_RESULT_ANALYSIS_ENABLED`)
 - [x] **5. Leaderboard** — classement équipes (points/V-D) + individuel (TOP KILLER)
 - [x] **6. Administration des matchs** — vue de tous les matchs (annuler/supprimer), minimum de joueurs
       requis pour jouer (réglage global)
 - [x] **7. Double soumission + arbitrage admin** — chaque équipe peut soumettre sa propre version du
-      résultat (screenshots + stats), comparées côte à côte ; l'admin a toujours le dernier mot et peut
-      corriger manuellement les stats officielles, même sur un résultat déjà validé (classement recalculé)
+      résultat, comparées côte à côte ; l'admin peut corriger manuellement les stats officielles, même
+      sur un résultat déjà validé (classement recalculé)
 - [x] **8. Tchat IA admin** — discussion libre avec l'IA (OpenRouter) depuis `/admin/chat`, sans accès
       aux données de la plateforme ; historique conservé côté navigateur (session) uniquement
 - [x] **9. Verrouillage & gestion des effectifs** — réglage global bloquant les modifications de
@@ -65,6 +65,16 @@ L'app tourne sur http://localhost:3000
       quelle équipe, y compris quand c'est verrouillé
 - [x] **10. Emails transactionnels (Brevo)** — proposition de match reçue, match confirmé, rappel
       30 min avant (via tâche planifiée externe sur `/api/cron/match-reminders`), bienvenue à l'inscription
+- [x] **11. Gestion des comptes (admin)** — `/admin/users` : suppression de compte (bloquée si des
+      matchs/attributions actives existent, dernier admin protégé), déclenchement d'une réinitialisation
+      de mot de passe pour n'importe quel utilisateur
+- [x] **12. Matchs attribués avec fenêtre de négociation** — un admin attribue un match entre deux
+      équipes sur une **période** (ex : du 11 au 13 juillet) plutôt qu'une heure fixe ; les équipes se
+      mettent d'accord sur une date précise via `/planning` ; sans accord avant la fin de la fenêtre,
+      le match est signalé aux admins (`/admin/assignments`) pour intervention directe
+- [x] **13. Réinitialisation de mot de passe** — self-service (`/forgot-password` → email avec lien →
+      `/reset-password`) ou déclenchée par un admin depuis `/admin/users`, via le modèle
+      `VerificationToken` existant (pas de nouvelle table)
 
 ## Notes techniques
 
@@ -81,9 +91,12 @@ L'app tourne sur http://localhost:3000
   l'admin en cas de litige (voir la section Déploiement pour le montage du volume persistant).
 - **Emails (Brevo)** : sans `BREVO_API_KEY`, les envois sont silencieusement ignorés (juste loggés) —
   ne bloque jamais la création d'un compte, d'une proposition ou d'un match.
-- **Rappel de match** : `/api/cron/match-reminders?secret=...` doit être appelée périodiquement par une
-  tâche planifiée externe (Dokploy Scheduled Task, cron-job.org…) — l'app ne peut pas se réveiller
-  toute seule à l'heure dite.
+- **Rappel de match & escalade des attributions** : `/api/cron/match-reminders?secret=...` doit être
+  appelée périodiquement par une tâche planifiée externe (Dokploy Scheduled Task, cron-job.org…) —
+  l'app ne peut pas se réveiller toute seule à l'heure dite. Cette même route vérifie aussi les
+  matchs attribués dont la fenêtre de négociation a expiré sans accord (passage en `ESCALATED`).
+- **Validation absolue** : aucun résultat ne peut être finalisé par simple accord des deux capitaines —
+  seul un compte `ADMIN` peut valider définitivement (`validateResult` / `adminUpdateResult`).
 
 ## Déploiement (Dokploy)
 
