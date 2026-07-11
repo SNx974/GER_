@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/session";
-import { getMaxPlayersPerTeam } from "@/lib/settings";
+import { getMaxPlayersPerTeam, getRosterLocked } from "@/lib/settings";
 import { playerSchema, type PlayerInput } from "@/lib/validators/player";
 import { ok, fail, type ActionResult } from "@/lib/actions";
 
@@ -31,6 +31,10 @@ function normalize(input: PlayerInput) {
 export async function addPlayer(input: PlayerInput): Promise<ActionResult> {
   const ctx = await requireCaptainTeam();
   if (!ctx.ok) return fail(ctx.error);
+
+  if (await getRosterLocked()) {
+    return fail("Les effectifs sont verrouillés par l'administration.");
+  }
 
   const parsed = playerSchema.safeParse(input);
   if (!parsed.success) {
@@ -67,6 +71,10 @@ export async function updatePlayer(
   const ctx = await requireCaptainTeam();
   if (!ctx.ok) return fail(ctx.error);
 
+  if (await getRosterLocked()) {
+    return fail("Les effectifs sont verrouillés par l'administration.");
+  }
+
   const parsed = playerSchema.safeParse(input);
   if (!parsed.success) {
     return fail(parsed.error.issues[0]?.message ?? "Données invalides");
@@ -96,6 +104,10 @@ export async function updatePlayer(
 export async function deletePlayer(playerId: string): Promise<ActionResult> {
   const ctx = await requireCaptainTeam();
   if (!ctx.ok) return fail(ctx.error);
+
+  if (await getRosterLocked()) {
+    return fail("Les effectifs sont verrouillés par l'administration.");
+  }
 
   const result = await prisma.player.deleteMany({
     where: { id: playerId, teamId: ctx.teamId },

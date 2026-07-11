@@ -233,12 +233,23 @@ async function openRouterAnalysis(
   };
 }
 
+/**
+ * Coupe-circuit pour l'analyse IA des résultats (screenshots → OpenRouter).
+ * Désactivée par défaut : la saisie manuelle + vérification admin est le
+ * flux normal actuel. Mettre AI_RESULT_ANALYSIS_ENABLED="true" pour
+ * réactiver sans changer de code. Ne concerne pas le tchat admin
+ * (fonctionnalité séparée, toujours active si OPENROUTER_API_KEY est défini).
+ */
+export function isResultAnalysisEnabled(): boolean {
+  return process.env.AI_RESULT_ANALYSIS_ENABLED === "true";
+}
+
 export async function analyzeResult(
   screenshots: string[],
   maps: MapStatInput[]
 ): Promise<AiAnalysis> {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return heuristicAnalysis(maps);
+  if (!apiKey || !isResultAnalysisEnabled()) return heuristicAnalysis(maps);
 
   const model = process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
   try {
@@ -282,7 +293,9 @@ export async function extractStatsFromScreenshots(
   roster: RosterPlayer[]
 ): Promise<ExtractedStat[]> {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey || screenshots.length === 0 || roster.length === 0) return [];
+  if (!apiKey || !isResultAnalysisEnabled() || screenshots.length === 0 || roster.length === 0) {
+    return [];
+  }
 
   const model = process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
 

@@ -66,25 +66,25 @@ export async function submitResult(
     );
   }
 
-  // Cohérence des maps et des joueurs
+  // Cohérence des maps ; les stats ne peuvent porter que sur les joueurs de
+  // SA PROPRE équipe (chaque équipe ne rapporte que ses propres statistiques,
+  // jamais celles de l'adversaire).
   const validMapIds = new Set(match.maps.map((m) => m.id));
-  const validPlayerIds = new Set([
-    ...match.teamA.players.map((p) => p.id),
-    ...match.teamB.players.map((p) => p.id),
-  ]);
+  const myTeam = isTeamA ? match.teamA : match.teamB;
+  const myPlayerIds = new Set(myTeam.players.map((p) => p.id));
 
   for (const map of parsed.data.maps) {
     if (!validMapIds.has(map.matchMapId)) {
       return fail("Une des maps ne correspond pas à ce match.");
     }
     for (const s of map.stats) {
-      if (!validPlayerIds.has(s.playerId)) {
-        return fail("Un joueur ne fait pas partie des équipes du match.");
+      if (!myPlayerIds.has(s.playerId)) {
+        return fail("Vous ne pouvez saisir que les statistiques de vos propres joueurs.");
       }
     }
   }
 
-  // Analyse IA sur cette soumission (hors transaction : appel externe)
+  // Analyse IA sur cette soumission (désactivée par défaut — voir isResultAnalysisEnabled)
   const aiInput: MapStatInput[] = parsed.data.maps.map((m, i) => ({
     mapName: `Map ${i + 1}`,
     scoreA: m.scoreA,
@@ -99,8 +99,28 @@ export async function submitResult(
     maps: parsed.data.maps,
   };
 
+  // Stats des joueurs de CETTE équipe pour chaque map — jamais de conflit
+  // possible avec l'autre soumission puisque chaque équipe ne possède que
+  // ses propres joueurs (contrainte unique matchMapId+playerId toujours
+  // respectée, que ce soit la 1ère ou la 2e équipe à soumettre).
+  const statOps: Prisma.PrismaPromise<unknown>[] = parsed.data.maps
+    .filter((m) => m.stats.length > 0)
+    .map((m) =>
+      prisma.playerMatchStat.createMany({
+        data: m.stats.map((s) => ({
+          matchMapId: m.matchMapId,
+          playerId: s.playerId,
+          kills: s.kills,
+          deaths: s.deaths,
+          assists: s.assists,
+          score: s.score,
+        })),
+      })
+    );
+
   if (!match.result) {
-    // Première soumission pour ce match : devient la version officielle.
+    // Première soumission pour ce match : fixe les scores provisoires des
+    // maps (comparés à la soumission de l'autre équipe le cas échéant).
     let seriesScoreA = 0;
     let seriesScoreB = 0;
     const mapUpdates = parsed.data.maps.map((map) => {
@@ -115,33 +135,17 @@ export async function submitResult(
       return { ...map, winnerId };
     });
 
-    const ops: Prisma.PrismaPromise<unknown>[] = [];
-    for (const map of mapUpdates) {
-      ops.push(
-        prisma.matchMap.update({
-          where: { id: map.matchMapId },
-          data: {
-            scoreTeamA: map.scoreA,
-            scoreTeamB: map.scoreB,
-            winnerId: map.winnerId,
-          },
-        })
-      );
-      if (map.stats.length > 0) {
-        ops.push(
-          prisma.playerMatchStat.createMany({
-            data: map.stats.map((s) => ({
-              matchMapId: map.matchMapId,
-              playerId: s.playerId,
-              kills: s.kills,
-              deaths: s.deaths,
-              assists: s.assists,
-              score: s.score,
-            })),
-          })
-        );
-      }
-    }
+    const ops: Prisma.PrismaPromise<unknown>[] = mapUpdates.map((map) =>
+      prisma.matchMap.update({
+        where: { id: map.matchMapId },
+        data: {
+          scoreTeamA: map.scoreA,
+          scoreTeamB: map.scoreB,
+          winnerId: map.winnerId,
+        },
+      })
+    );
+    ops.push(...statOps);
     ops.push(
       prisma.matchResult.create({
         data: {
@@ -174,9 +178,9 @@ export async function submitResult(
     await notify(opponentCaptainId, "RESULT_SUBMITTED", { token });
     await notifyAdmins("RESULT_SUBMITTED", { token, aiFlagged: ai.flagged });
   } else {
-    // Deuxième soumission (l'autre équipe) : enregistrée pour comparaison,
-    // sans écraser les valeurs officielles déjà en place — c'est à l'admin
-    // de trancher si les deux versions divergent (voir /admin/results).
+    // Deuxième soumission (l'autre équipe) : ajoute les stats de SES joueurs
+    // (absentes jusqu'ici) et compare le score de map rapporté à celui déjà
+    // enregistré — s'ils divergent, l'admin devra trancher.
     const currentMaps = await prisma.matchMap.findMany({
       where: { matchId: match.id },
       select: { id: true, scoreTeamA: true, scoreTeamB: true },
@@ -188,18 +192,22 @@ export async function submitResult(
 
     const alreadyValidated = match.result.status === "VALIDATED";
 
-    await prisma.matchResult.update({
-      where: { id: match.result.id },
-      data: {
-        [isTeamA ? "teamASubmission" : "teamBSubmission"]:
-          snapshot as unknown as Prisma.InputJsonValue,
-        screenshots: Array.from(
-          new Set([...match.result.screenshots, ...parsed.data.screenshots])
-        ).slice(0, 20),
-        status:
-          differs && !alreadyValidated ? "DISPUTED" : match.result.status,
-      },
-    });
+    const ops: Prisma.PrismaPromise<unknown>[] = [...statOps];
+    ops.push(
+      prisma.matchResult.update({
+        where: { id: match.result.id },
+        data: {
+          [isTeamA ? "teamASubmission" : "teamBSubmission"]:
+            snapshot as unknown as Prisma.InputJsonValue,
+          screenshots: Array.from(
+            new Set([...match.result.screenshots, ...parsed.data.screenshots])
+          ).slice(0, 20),
+          status: differs && !alreadyValidated ? "DISPUTED" : match.result.status,
+        },
+      })
+    );
+
+    await prisma.$transaction(ops);
 
     await notifyAdmins("RESULT_SUBMITTED", {
       token,

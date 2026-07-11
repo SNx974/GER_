@@ -6,6 +6,7 @@ import { getCaptainContext } from "@/lib/guards";
 import { findConflict, conflictMessage } from "@/lib/planning";
 import { notify } from "@/lib/notifications";
 import { getMinPlayersToPlay } from "@/lib/settings";
+import { sendProposalReceivedEmail, sendMatchConfirmedEmail } from "@/lib/email";
 import {
   availabilitySchema,
   proposalSchema,
@@ -79,7 +80,12 @@ export async function createProposal(
 
   const opponent = await prisma.team.findUnique({
     where: { id: opponentTeamId },
-    select: { id: true, captainId: true, name: true },
+    select: {
+      id: true,
+      captainId: true,
+      name: true,
+      captain: { select: { email: true, name: true } },
+    },
   });
   if (!opponent) return fail("Équipe adverse introuvable.");
 
@@ -123,6 +129,12 @@ export async function createProposal(
     date: proposedDate.toISOString(),
     format,
   });
+  await sendProposalReceivedEmail({
+    to: { email: opponent.captain.email, name: opponent.captain.name ?? undefined },
+    opponentTeamName: myTeam?.name ?? "Une équipe",
+    proposedDate,
+    format,
+  });
 
   revalidatePath("/planning");
   return ok();
@@ -138,8 +150,21 @@ export async function respondProposal(
   const proposal = await prisma.matchProposal.findUnique({
     where: { id: proposalId },
     include: {
-      proposingTeam: { select: { id: true, captainId: true, name: true } },
-      opponentTeam: { select: { id: true, name: true } },
+      proposingTeam: {
+        select: {
+          id: true,
+          captainId: true,
+          name: true,
+          captain: { select: { email: true, name: true } },
+        },
+      },
+      opponentTeam: {
+        select: {
+          id: true,
+          name: true,
+          captain: { select: { email: true, name: true } },
+        },
+      },
     },
   });
   if (!proposal) return fail("Proposition introuvable.");
@@ -201,6 +226,22 @@ export async function respondProposal(
   await notify(proposal.proposingTeam.captainId, "PROPOSAL_ACCEPTED", {
     byTeam: proposal.opponentTeam.name,
     date: proposal.proposedDate.toISOString(),
+  });
+  await sendMatchConfirmedEmail({
+    to: [
+      {
+        email: proposal.proposingTeam.captain.email,
+        name: proposal.proposingTeam.captain.name ?? undefined,
+      },
+      {
+        email: proposal.opponentTeam.captain.email,
+        name: proposal.opponentTeam.captain.name ?? undefined,
+      },
+    ],
+    teamAName: proposal.proposingTeam.name,
+    teamBName: proposal.opponentTeam.name,
+    scheduledAt: proposal.proposedDate,
+    format: proposal.format,
   });
 
   revalidatePath("/planning");

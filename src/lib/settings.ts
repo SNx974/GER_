@@ -30,3 +30,11 @@ export async function getMinPlayersToPlay(): Promise<number> {
   });
   return setting?.minPlayersToPlay ?? DEFAULT_MIN_PLAYERS_TO_PLAY;
 }
+
+/** Si vrai, les capitaines ne peuvent plus modifier leur effectif (seul un admin le peut). */
+export async function getRosterLocked(): Promise<boolean> {
+  const setting = await prisma.globalSetting.findUnique({
+    where: { id: "global" },
+  });
+  return setting?.rosterLocked ?? false;
+}

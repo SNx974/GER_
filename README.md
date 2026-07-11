@@ -48,8 +48,10 @@ L'app tourne sur http://localhost:3000
 - [x] **1. Espace Équipe & gestion des joueurs** — CRUD joueurs + limite, profil public (classement/historique), réglage global admin
 - [x] **2. Planning & propositions de match** — disponibilités, logique de conflit, propositions accept/refus, notifications
 - [x] **3. Mapban temps réel (Match Room)** — lien unique, veto tour par tour BO1/BO3/BO5 via SSE, récap decider
-- [x] **4. Résultats + analyse IA** — upload de screenshots (drag & drop), extraction de stats via
-      OpenRouter (repli sur saisie manuelle), analyse d'anomalies, double validation + modération admin dédiée
+- [x] **4. Résultats** — chaque équipe saisit manuellement le score et les stats de **ses propres
+      joueurs uniquement** (screenshot optionnel, à titre de preuve), analyse d'anomalies heuristique,
+      double validation + modération admin dédiée. L'analyse IA via screenshots existe mais est
+      désactivée par défaut (voir `AI_RESULT_ANALYSIS_ENABLED`)
 - [x] **5. Leaderboard** — classement équipes (points/V-D) + individuel (TOP KILLER)
 - [x] **6. Administration des matchs** — vue de tous les matchs (annuler/supprimer), minimum de joueurs
       requis pour jouer (réglage global)
@@ -58,20 +60,30 @@ L'app tourne sur http://localhost:3000
       corriger manuellement les stats officielles, même sur un résultat déjà validé (classement recalculé)
 - [x] **8. Tchat IA admin** — discussion libre avec l'IA (OpenRouter) depuis `/admin/chat`, sans accès
       aux données de la plateforme ; historique conservé côté navigateur (session) uniquement
+- [x] **9. Verrouillage & gestion des effectifs** — réglage global bloquant les modifications de
+      roster par les capitaines ; `/admin/rosters` permet à l'admin de gérer l'effectif de n'importe
+      quelle équipe, y compris quand c'est verrouillé
+- [x] **10. Emails transactionnels (Brevo)** — proposition de match reçue, match confirmé, rappel
+      30 min avant (via tâche planifiée externe sur `/api/cron/match-reminders`), bienvenue à l'inscription
 
 ## Notes techniques
 
 - **Temps réel (Mapban)** : Server-Sent Events via un bus d'événements en mémoire
   ([src/lib/realtime.ts](src/lib/realtime.ts)). OK pour un serveur unique ; pour du
   multi-instance/serverless, remplacer par Redis pub/sub, Pusher ou Ably (même interface).
-- **Analyse IA** : reconnaissance d'image via **OpenRouter** (`OPENROUTER_API_KEY`), modèle par
-  défaut `google/gemma-4-31b-it:free` (gratuit, vision). Les screenshots sont envoyés en base64 pour
-  comparer les stats déclarées aux tableaux des scores et pré-remplir les stats. Sans clé, repli
-  heuristique local. Le modèle est configurable via `OPENROUTER_MODEL` sans changer de code —
-  `openrouter/free` (routeur automatique) est aussi supporté : plus résilient si un modèle précis
-  est retiré, mais le modèle qui répond peut varier d'un appel à l'autre.
-- **Screenshots** : uploadés via `/api/upload` et stockés dans `uploads/` (voir la section
-  Déploiement ci-dessous pour le montage du volume persistant).
+- **Analyse IA des résultats** : désactivée par défaut (`AI_RESULT_ANALYSIS_ENABLED="false"`) —
+  chaque équipe saisit manuellement ses stats, un repli heuristique local (règles simples sur les
+  chiffres) reste actif gratuitement. Le code d'intégration OpenRouter (vision, `google/gemma-4-31b-it:free`
+  par défaut) est conservé et se réactive en repassant la variable à `"true"`, sans redéploiement de code.
+- **Tchat IA admin** : fonctionnalité séparée, toujours active tant que `OPENROUTER_API_KEY` est défini
+  (indépendante du réglage ci-dessus).
+- **Screenshots** : upload optionnel via `/api/upload`, stockés dans `uploads/` comme preuve pour
+  l'admin en cas de litige (voir la section Déploiement pour le montage du volume persistant).
+- **Emails (Brevo)** : sans `BREVO_API_KEY`, les envois sont silencieusement ignorés (juste loggés) —
+  ne bloque jamais la création d'un compte, d'une proposition ou d'un match.
+- **Rappel de match** : `/api/cron/match-reminders?secret=...` doit être appelée périodiquement par une
+  tâche planifiée externe (Dokploy Scheduled Task, cron-job.org…) — l'app ne peut pas se réveiller
+  toute seule à l'heure dite.
 
 ## Déploiement (Dokploy)
 
@@ -92,14 +104,21 @@ plateforme (Dockerfile ou détection automatique type Nixpacks).
    | `NEXTAUTH_SECRET` | un secret aléatoire (`openssl rand -base64 32`) |
    | `NEXTAUTH_URL` | l'URL publique de l'app, **avec le protocole** (ex : `https://ger.mondomaine.com`) |
    | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | l'admin initial |
-   | `OPENROUTER_API_KEY` | clé gratuite depuis [openrouter.ai/keys](https://openrouter.ai/keys) (reconnaissance d'image + tchat admin) |
-   | `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` (déterministe) ou `openrouter/free` (routeur auto, résilient) — optionnel |
+   | `OPENROUTER_API_KEY` | clé gratuite depuis [openrouter.ai/keys](https://openrouter.ai/keys) (tchat admin) |
+   | `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` (optionnel, défaut déjà appliqué) |
    | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` (optionnel, défaut déjà appliqué) |
+   | `AI_RESULT_ANALYSIS_ENABLED` | `false` (défaut) — mettre `true` pour réactiver l'analyse IA des screenshots |
+   | `BREVO_API_KEY` | clé depuis [app.brevo.com](https://app.brevo.com) (emails transactionnels) |
+   | `BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME` | expéditeur **vérifié** dans Brevo |
+   | `CRON_SECRET` | secret aléatoire, protège `/api/cron/match-reminders` |
 
 4. **Port** : l'app écoute sur `3000`.
 5. **Volume persistant (important)** : monter un volume Dokploy sur `/app/uploads`.
    Les screenshots uploadés par les équipes y sont stockés (route `/api/upload`) ;
    sans volume, ils sont perdus à chaque redéploiement du conteneur.
+6. **Rappel de match (tâche planifiée)** : configurer une tâche planifiée (Dokploy Scheduled
+   Task ou un cron externe gratuit type cron-job.org) qui appelle toutes les 1 à 5 minutes :
+   `GET https://<votre-domaine>/api/cron/match-reminders?secret=<CRON_SECRET>`
 
 Au premier démarrage, les tables sont créées et l'admin + le pool de maps sont seedés
 automatiquement. En cas de doute sur la config, visiter `/api/health` : elle

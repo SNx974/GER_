@@ -8,7 +8,9 @@ import { auth } from "@/lib/session";
 import { getAdminContext } from "@/lib/guards";
 import { createAdminSchema, type CreateAdminInput } from "@/lib/validators/auth";
 import { mapSchema, type MapInput } from "@/lib/validators/map";
+import { playerSchema, type PlayerInput } from "@/lib/validators/player";
 import { buildMatchImpactOps } from "@/lib/leaderboard-adjust";
+import { getMaxPlayersPerTeam } from "@/lib/settings";
 import { ok, fail, type ActionResult } from "@/lib/actions";
 
 export async function updateMaxPlayers(value: number): Promise<ActionResult> {
@@ -50,6 +52,22 @@ export async function updateMinPlayers(value: number): Promise<ActionResult> {
 
   revalidatePath("/admin/settings");
   revalidatePath("/planning");
+  return ok();
+}
+
+export async function updateRosterLocked(value: boolean): Promise<ActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  await prisma.globalSetting.upsert({
+    where: { id: "global" },
+    update: { rosterLocked: value },
+    create: { id: "global", rosterLocked: value },
+  });
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/rosters");
+  revalidatePath("/team");
   return ok();
 }
 
@@ -218,5 +236,91 @@ export async function deleteMatch(matchId: string): Promise<ActionResult> {
   revalidatePath("/admin/results");
   revalidatePath("/matches");
   revalidatePath("/leaderboard");
+  return ok();
+}
+
+// ─── Gestion des effectifs par l'admin (bypass le verrou et la propriété) ───
+
+function normalizePlayer(input: PlayerInput) {
+  return {
+    pseudo: input.pseudo.trim(),
+    gameId: input.gameId?.trim() || null,
+    role: input.role?.trim() || null,
+  };
+}
+
+export async function adminAddPlayer(
+  teamId: string,
+  input: PlayerInput
+): Promise<ActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  const parsed = playerSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Données invalides");
+  }
+
+  const [max, count] = await Promise.all([
+    getMaxPlayersPerTeam(),
+    prisma.player.count({ where: { teamId } }),
+  ]);
+  if (count >= max) {
+    return fail(`Limite atteinte : ${max} joueurs maximum par équipe.`);
+  }
+
+  try {
+    await prisma.player.create({ data: { teamId, ...normalizePlayer(parsed.data) } });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      return fail("Un joueur avec ce pseudo existe déjà dans l'équipe.");
+    }
+    throw e;
+  }
+
+  revalidatePath("/admin/rosters");
+  revalidatePath("/team");
+  return ok();
+}
+
+export async function adminUpdatePlayer(
+  playerId: string,
+  input: PlayerInput
+): Promise<ActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  const parsed = playerSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Données invalides");
+  }
+
+  try {
+    await prisma.player.update({
+      where: { id: playerId },
+      data: normalizePlayer(parsed.data),
+    });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError) {
+      if (e.code === "P2002") return fail("Un joueur avec ce pseudo existe déjà dans l'équipe.");
+      if (e.code === "P2025") return fail("Joueur introuvable.");
+    }
+    throw e;
+  }
+
+  revalidatePath("/admin/rosters");
+  revalidatePath("/team");
+  return ok();
+}
+
+export async function adminDeletePlayer(playerId: string): Promise<ActionResult> {
+  const ctx = await getAdminContext();
+  if (!ctx.ok) return fail(ctx.error);
+
+  const result = await prisma.player.deleteMany({ where: { id: playerId } });
+  if (result.count === 0) return fail("Joueur introuvable.");
+
+  revalidatePath("/admin/rosters");
+  revalidatePath("/team");
   return ok();
 }

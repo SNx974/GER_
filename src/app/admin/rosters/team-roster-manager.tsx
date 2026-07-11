@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Pencil, Plus, Trash2, UserPlus } from "lucide-react";
-import { addPlayer, deletePlayer, updatePlayer } from "./actions";
+import { adminAddPlayer, adminDeletePlayer, adminUpdatePlayer } from "../actions";
 import { PLAYER_ROLES, type PlayerInput } from "@/lib/validators/player";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 export type PlayerRow = {
   id: string;
@@ -33,21 +40,23 @@ export type PlayerRow = {
 };
 
 type Props = {
+  teamId: string;
+  teamName: string;
+  teamTag: string | null;
   players: PlayerRow[];
   maxPlayers: number;
-  locked?: boolean;
 };
 
 const EMPTY: PlayerInput = { pseudo: "", gameId: "", role: "" };
 
-export function PlayerManager({ players, maxPlayers, locked = false }: Props) {
+export function TeamRosterManager({ teamId, teamName, teamTag, players, maxPlayers }: Props) {
   const [pending, startTransition] = useTransition();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<PlayerRow | null>(null);
   const [form, setForm] = useState<PlayerInput>(EMPTY);
   const [error, setError] = useState<string | null>(null);
 
-  const atLimit = players.length >= maxPlayers || locked;
+  const atLimit = players.length >= maxPlayers;
 
   function openAdd() {
     setEditing(null);
@@ -68,8 +77,8 @@ export function PlayerManager({ players, maxPlayers, locked = false }: Props) {
     setError(null);
     startTransition(async () => {
       const res = editing
-        ? await updatePlayer(editing.id, form)
-        : await addPlayer(form);
+        ? await adminUpdatePlayer(editing.id, form)
+        : await adminAddPlayer(teamId, form);
       if (!res.ok) {
         setError(res.error);
         return;
@@ -79,123 +88,102 @@ export function PlayerManager({ players, maxPlayers, locked = false }: Props) {
   }
 
   function remove(p: PlayerRow) {
-    if (!confirm(`Retirer ${p.pseudo} de l'équipe ?`)) return;
+    if (!confirm(`Retirer ${p.pseudo} de ${teamName} ?`)) return;
     startTransition(async () => {
-      const res = await deletePlayer(p.id);
+      const res = await adminDeletePlayer(p.id);
       if (!res.ok) alert(res.error);
     });
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          {players.length} / {maxPlayers} joueurs
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle className="text-base">
+            {teamName}
+            {teamTag ? ` [${teamTag}]` : ""}
+          </CardTitle>
+          <CardDescription>
+            {players.length} / {maxPlayers} joueurs
+          </CardDescription>
         </div>
         <Button size="sm" onClick={openAdd} disabled={atLimit || pending}>
-          <UserPlus /> Ajouter un joueur
+          <UserPlus /> Ajouter
         </Button>
-      </div>
-
-      {atLimit && (
-        <p className="text-xs text-muted-foreground">
-          Limite de {maxPlayers} joueurs atteinte (réglage global).
-        </p>
-      )}
-
-      {players.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Aucun joueur pour l&apos;instant. Ajoutez votre premier joueur.
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Pseudo</TableHead>
-              <TableHead>ID en jeu</TableHead>
-              <TableHead>Rôle</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {players.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.pseudo}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {p.gameId ?? "—"}
-                </TableCell>
-                <TableCell>
-                  {p.role ? <Badge variant="secondary">{p.role}</Badge> : "—"}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => openEdit(p)}
-                      disabled={pending || locked}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => remove(p)}
-                      disabled={pending || locked}
-                    >
-                      <Trash2 className="text-destructive" />
-                    </Button>
-                  </div>
-                </TableCell>
+      </CardHeader>
+      <CardContent>
+        {players.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Aucun joueur.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pseudo</TableHead>
+                <TableHead>ID en jeu</TableHead>
+                <TableHead>Rôle</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+            </TableHeader>
+            <TableBody>
+              {players.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="font-medium">{p.pseudo}</TableCell>
+                  <TableCell className="text-muted-foreground">{p.gameId ?? "—"}</TableCell>
+                  <TableCell>
+                    {p.role ? <Badge variant="secondary">{p.role}</Badge> : "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(p)} disabled={pending}>
+                        <Pencil />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => remove(p)} disabled={pending}>
+                        <Trash2 className="text-destructive" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <form onSubmit={submit}>
             <DialogHeader>
               <DialogTitle>
-                {editing ? "Modifier le joueur" : "Ajouter un joueur"}
+                {editing ? "Modifier le joueur" : `Ajouter un joueur à ${teamName}`}
               </DialogTitle>
-              <DialogDescription>
-                Renseignez les informations du joueur.
-              </DialogDescription>
+              <DialogDescription>Renseignez les informations du joueur.</DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="pseudo">Pseudo *</Label>
+                <Label htmlFor={`pseudo-${teamId}`}>Pseudo *</Label>
                 <Input
-                  id="pseudo"
+                  id={`pseudo-${teamId}`}
                   value={form.pseudo}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, pseudo: e.target.value }))
-                  }
+                  onChange={(e) => setForm((f) => ({ ...f, pseudo: e.target.value }))}
                   required
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="gameId">ID en jeu (Riot ID…)</Label>
+                <Label htmlFor={`gameId-${teamId}`}>ID en jeu (Riot ID…)</Label>
                 <Input
-                  id="gameId"
+                  id={`gameId-${teamId}`}
                   value={form.gameId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, gameId: e.target.value }))
-                  }
+                  onChange={(e) => setForm((f) => ({ ...f, gameId: e.target.value }))}
                   placeholder="Player#EUW"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="role">Rôle</Label>
+                <Label htmlFor={`role-${teamId}`}>Rôle</Label>
                 <select
-                  id="role"
+                  id={`role-${teamId}`}
                   value={form.role}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, role: e.target.value }))
-                  }
+                  onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="">— Aucun —</option>
@@ -211,9 +199,7 @@ export function PlayerManager({ players, maxPlayers, locked = false }: Props) {
 
             <DialogFooter>
               <Button type="submit" disabled={pending}>
-                {pending ? (
-                  "Enregistrement…"
-                ) : editing ? (
+                {pending ? "Enregistrement…" : editing ? (
                   <>
                     <Pencil /> Enregistrer
                   </>
@@ -227,6 +213,6 @@ export function PlayerManager({ players, maxPlayers, locked = false }: Props) {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </Card>
   );
 }

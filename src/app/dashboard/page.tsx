@@ -88,6 +88,11 @@ export default async function DashboardPage() {
               <Link href="/admin/maps">Pool de maps</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
+              <Link href="/admin/rosters">
+                <Users /> Effectifs
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
               <Link href="/admin/chat">
                 <Bot /> Tchat IA
               </Link>

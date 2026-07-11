@@ -112,7 +112,8 @@ export default async function ResultPage({
       )}
 
       {/* Formulaire de soumission : visible tant que CE capitaine n'a pas
-          encore soumis sa propre version, même si l'autre équipe l'a déjà fait. */}
+          encore soumis sa propre version, même si l'autre équipe l'a déjà fait.
+          Chaque équipe ne saisit que ses propres joueurs. */}
       {canSubmitMyself && (
         <ResultForm
           token={params.token}
@@ -121,8 +122,12 @@ export default async function ResultPage({
             mapName: m.map.name,
             isDecider: m.isDecider,
           }))}
-          teamA={{ name: match.teamA.name, players: match.teamA.players }}
-          teamB={{ name: match.teamB.name, players: match.teamB.players }}
+          myTeam={{
+            name: isA ? match.teamA.name : match.teamB.name,
+            players: isA ? match.teamA.players : match.teamB.players,
+          }}
+          opponentTeamName={isA ? match.teamB.name : match.teamA.name}
+          myLetter={isA ? "A" : "B"}
         />
       )}
 

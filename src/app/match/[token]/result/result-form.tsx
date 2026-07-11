@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Sparkles, Upload, X } from "lucide-react";
+import { Send, Upload, X } from "lucide-react";
 import { submitResult } from "./actions";
 import type { SubmitResultValues } from "@/lib/validators/result";
 import { Button } from "@/components/ui/button";
@@ -15,22 +15,16 @@ export type MapLite = { matchMapId: string; mapName: string; isDecider: boolean 
 type Props = {
   token: string;
   maps: MapLite[];
-  teamA: { name: string; players: PlayerLite[] };
-  teamB: { name: string; players: PlayerLite[] };
+  myTeam: { name: string; players: PlayerLite[] };
+  opponentTeamName: string;
+  /** Position de mon équipe dans le match — détermine où placer mon score (scoreA/scoreB). */
+  myLetter: "A" | "B";
 };
 
 type StatState = { kills: string; deaths: string; assists: string; score: string };
 const EMPTY_STAT: StatState = { kills: "0", deaths: "0", assists: "0", score: "0" };
 
-type ExtractedStat = {
-  playerId: string;
-  kills: number;
-  deaths: number;
-  assists: number;
-  score: number;
-};
-
-export function ResultForm({ token, maps, teamA, teamB }: Props) {
+export function ResultForm({ token, maps, myTeam, opponentTeamName, myLetter }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -40,37 +34,26 @@ export function ResultForm({ token, maps, teamA, teamB }: Props) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [extracting, setExtracting] = useState<Record<string, boolean>>({});
-  const [extractMsg, setExtractMsg] = useState<Record<string, string>>({});
-
-  // scores[matchMapId] = { a, b }
-  const [scores, setScores] = useState<Record<string, { a: string; b: string }>>(
-    Object.fromEntries(maps.map((m) => [m.matchMapId, { a: "0", b: "0" }]))
+  // scores[matchMapId] = { my, opponent }
+  const [scores, setScores] = useState<Record<string, { my: string; opponent: string }>>(
+    Object.fromEntries(maps.map((m) => [m.matchMapId, { my: "0", opponent: "0" }]))
   );
 
-  // stats[matchMapId][playerId] = StatState
-  const allPlayers = [...teamA.players, ...teamB.players];
-  const [stats, setStats] = useState<
-    Record<string, Record<string, StatState>>
-  >(
+  // stats[matchMapId][playerId] = StatState — uniquement mes propres joueurs
+  const [stats, setStats] = useState<Record<string, Record<string, StatState>>>(
     Object.fromEntries(
       maps.map((m) => [
         m.matchMapId,
-        Object.fromEntries(allPlayers.map((p) => [p.id, { ...EMPTY_STAT }])),
+        Object.fromEntries(myTeam.players.map((p) => [p.id, { ...EMPTY_STAT }])),
       ])
     )
   );
 
-  function setScore(mapId: string, side: "a" | "b", value: string) {
+  function setScore(mapId: string, side: "my" | "opponent", value: string) {
     setScores((prev) => ({ ...prev, [mapId]: { ...prev[mapId]!, [side]: value } }));
   }
 
-  function setStat(
-    mapId: string,
-    playerId: string,
-    field: keyof StatState,
-    value: string
-  ) {
+  function setStat(mapId: string, playerId: string, field: keyof StatState, value: string) {
     setStats((prev) => ({
       ...prev,
       [mapId]: {
@@ -109,90 +92,32 @@ export function ResultForm({ token, maps, teamA, teamB }: Props) {
     setScreenshots((prev) => prev.filter((u) => u !== url));
   }
 
-  async function extractForMap(mapId: string) {
-    if (screenshots.length === 0) {
-      setExtractMsg((m) => ({
-        ...m,
-        [mapId]: "Ajoutez au moins un screenshot avant d'extraire.",
-      }));
-      return;
-    }
-    setExtracting((s) => ({ ...s, [mapId]: true }));
-    setExtractMsg((m) => ({ ...m, [mapId]: "" }));
-
-    try {
-      const res = await fetch(`/api/match/${token}/result/extract`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ screenshots }),
-      });
-      const data = (await res.json()) as {
-        stats?: ExtractedStat[];
-        found?: boolean;
-        error?: string;
-      };
-
-      if (!res.ok) {
-        setExtractMsg((m) => ({ ...m, [mapId]: data.error ?? "Extraction impossible." }));
-        return;
-      }
-      if (!data.stats || data.stats.length === 0) {
-        setExtractMsg((m) => ({
-          ...m,
-          [mapId]:
-            "L'IA n'a détecté aucune statistique exploitable — merci de saisir les scores manuellement.",
-        }));
-        return;
-      }
-
-      setStats((prev) => {
-        const next = { ...prev };
-        const mapStats = { ...next[mapId]! };
-        for (const s of data.stats!) {
-          if (mapStats[s.playerId]) {
-            mapStats[s.playerId] = {
-              kills: String(s.kills),
-              deaths: String(s.deaths),
-              assists: String(s.assists),
-              score: String(s.score),
-            };
-          }
-        }
-        next[mapId] = mapStats;
-        return next;
-      });
-      setExtractMsg((m) => ({
-        ...m,
-        [mapId]: `${data.stats!.length} joueur(s) rempli(s) automatiquement — vérifiez avant d'envoyer.`,
-      }));
-    } catch {
-      setExtractMsg((m) => ({ ...m, [mapId]: "Erreur réseau pendant l'extraction." }));
-    } finally {
-      setExtracting((s) => ({ ...s, [mapId]: false }));
-    }
-  }
-
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
     const payload: SubmitResultValues = {
       screenshots,
-      maps: maps.map((m) => ({
-        matchMapId: m.matchMapId,
-        scoreA: Number(scores[m.matchMapId]!.a),
-        scoreB: Number(scores[m.matchMapId]!.b),
-        stats: allPlayers.map((p) => {
-          const s = stats[m.matchMapId]![p.id]!;
-          return {
-            playerId: p.id,
-            kills: Number(s.kills),
-            deaths: Number(s.deaths),
-            assists: Number(s.assists),
-            score: Number(s.score),
-          };
-        }),
-      })),
+      maps: maps.map((m) => {
+        const s = scores[m.matchMapId]!;
+        const scoreA = myLetter === "A" ? s.my : s.opponent;
+        const scoreB = myLetter === "A" ? s.opponent : s.my;
+        return {
+          matchMapId: m.matchMapId,
+          scoreA: Number(scoreA),
+          scoreB: Number(scoreB),
+          stats: myTeam.players.map((p) => {
+            const st = stats[m.matchMapId]![p.id]!;
+            return {
+              playerId: p.id,
+              kills: Number(st.kills),
+              deaths: Number(st.deaths),
+              assists: Number(st.assists),
+              score: Number(st.score),
+            };
+          }),
+        };
+      }),
     };
 
     startTransition(async () => {
@@ -207,8 +132,14 @@ export function ResultForm({ token, maps, teamA, teamB }: Props) {
 
   return (
     <form onSubmit={submit} className="space-y-8">
+      <p className="text-sm text-muted-foreground">
+        Saisissez uniquement le score et les statistiques de{" "}
+        <strong>{myTeam.name}</strong>. {opponentTeamName} soumettra les
+        siennes séparément.
+      </p>
+
       <div className="space-y-3">
-        <Label>Screenshots des tableaux des scores</Label>
+        <Label>Screenshot (optionnel)</Label>
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
@@ -220,8 +151,8 @@ export function ResultForm({ token, maps, teamA, teamB }: Props) {
         >
           <Upload className="h-6 w-6" />
           <p>
-            Glissez-déposez vos screenshots ici, ou cliquez pour parcourir
-            votre PC.
+            Glissez-déposez le tableau des scores de votre équipe, ou cliquez
+            pour parcourir votre PC.
           </p>
           <p className="text-xs">PNG, JPG, WEBP — 8 Mo max par fichier</p>
           <input
@@ -237,9 +168,7 @@ export function ResultForm({ token, maps, teamA, teamB }: Props) {
           />
         </div>
 
-        {uploading && (
-          <p className="text-sm text-muted-foreground">Envoi en cours…</p>
-        )}
+        {uploading && <p className="text-sm text-muted-foreground">Envoi en cours…</p>}
         {uploadError && <p className="text-sm text-destructive">{uploadError}</p>}
 
         {screenshots.length > 0 && (
@@ -264,9 +193,8 @@ export function ResultForm({ token, maps, teamA, teamB }: Props) {
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          Ces images seront analysées par l&apos;IA pour détecter d&apos;éventuelles
-          anomalies, et peuvent servir à pré-remplir les statistiques
-          ci-dessous.
+          Sert de preuve pour l&apos;admin en cas de litige — pas d&apos;analyse
+          automatique.
         </p>
       </div>
 
@@ -280,65 +208,42 @@ export function ResultForm({ token, maps, teamA, teamB }: Props) {
               )}
             </h3>
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Score</span>
+              <span className="text-muted-foreground">{myTeam.name}</span>
               <Input
                 type="number"
                 min={0}
                 className="w-16"
-                value={scores[m.matchMapId]!.a}
-                onChange={(e) => setScore(m.matchMapId, "a", e.target.value)}
-                aria-label={`Score ${teamA.name}`}
+                value={scores[m.matchMapId]!.my}
+                onChange={(e) => setScore(m.matchMapId, "my", e.target.value)}
+                aria-label={`Score ${myTeam.name}`}
               />
               <span>–</span>
               <Input
                 type="number"
                 min={0}
                 className="w-16"
-                value={scores[m.matchMapId]!.b}
-                onChange={(e) => setScore(m.matchMapId, "b", e.target.value)}
-                aria-label={`Score ${teamB.name}`}
+                value={scores[m.matchMapId]!.opponent}
+                onChange={(e) => setScore(m.matchMapId, "opponent", e.target.value)}
+                aria-label={`Score ${opponentTeamName}`}
               />
+              <span className="text-muted-foreground">{opponentTeamName}</span>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => extractForMap(m.matchMapId)}
-              disabled={extracting[m.matchMapId]}
-            >
-              <Sparkles className="h-4 w-4" />
-              {extracting[m.matchMapId] ? "Analyse…" : "Extraire avec l'IA"}
-            </Button>
           </div>
-          {extractMsg[m.matchMapId] && (
-            <p className="mb-3 text-xs text-muted-foreground">
-              {extractMsg[m.matchMapId]}
-            </p>
-          )}
 
           <StatTable
-            teamName={teamA.name}
-            players={teamA.players}
+            teamName={myTeam.name}
+            players={myTeam.players}
             mapId={m.matchMapId}
             stats={stats}
             onChange={setStat}
           />
-          <div className="mt-4">
-            <StatTable
-              teamName={teamB.name}
-              players={teamB.players}
-              mapId={m.matchMapId}
-              stats={stats}
-              onChange={setStat}
-            />
-          </div>
         </div>
       ))}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <Button type="submit" disabled={pending}>
-        <Send /> {pending ? "Envoi & analyse IA…" : "Soumettre le résultat"}
+        <Send /> {pending ? "Envoi…" : "Soumettre mon résultat"}
       </Button>
     </form>
   );
@@ -371,7 +276,6 @@ function StatTable({
   }
   return (
     <div>
-      <div className="mb-1 text-sm font-medium">{teamName}</div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -389,21 +293,17 @@ function StatTable({
               return (
                 <tr key={p.id}>
                   <td className="py-1 pr-2">{p.pseudo}</td>
-                  {(["kills", "deaths", "assists", "score"] as const).map(
-                    (field) => (
-                      <td key={field} className="py-1 pr-1">
-                        <Input
-                          type="number"
-                          min={0}
-                          className="h-8"
-                          value={s[field]}
-                          onChange={(e) =>
-                            onChange(mapId, p.id, field, e.target.value)
-                          }
-                        />
-                      </td>
-                    )
-                  )}
+                  {(["kills", "deaths", "assists", "score"] as const).map((field) => (
+                    <td key={field} className="py-1 pr-1">
+                      <Input
+                        type="number"
+                        min={0}
+                        className="h-8"
+                        value={s[field]}
+                        onChange={(e) => onChange(mapId, p.id, field, e.target.value)}
+                      />
+                    </td>
+                  ))}
                 </tr>
               );
             })}

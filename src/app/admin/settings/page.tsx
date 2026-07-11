@@ -3,6 +3,7 @@ import { getGlobalSetting } from "@/lib/settings";
 import { AppShell } from "@/components/app-shell";
 import { SettingsForm } from "./settings-form";
 import { CreateAdminForm } from "./create-admin-form";
+import { RosterLockToggle } from "./roster-lock-toggle";
 import {
   Card,
   CardContent,
@@ -37,6 +38,18 @@ export default async function AdminSettingsPage() {
             initialMax={setting.maxPlayersPerTeam}
             initialMin={setting.minPlayersToPlay}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Verrouillage des effectifs</CardTitle>
+          <CardDescription>
+            Bloque les modifications de roster par les capitaines.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <RosterLockToggle initialLocked={setting.rosterLocked} />
         </CardContent>
       </Card>
 

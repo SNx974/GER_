@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ExternalLink, Trophy } from "lucide-react";
 import { requireAuth } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
-import { getMaxPlayersPerTeam, getMinPlayersToPlay } from "@/lib/settings";
+import { getMaxPlayersPerTeam, getMinPlayersToPlay, getRosterLocked } from "@/lib/settings";
 import { getTeamRank } from "@/lib/teams";
 import { AppShell } from "@/components/app-shell";
 import { PlayerManager } from "./player-manager";
@@ -24,7 +24,7 @@ export default async function TeamManagementPage() {
     redirect("/dashboard");
   }
 
-  const [team, maxPlayers, minPlayers, rankInfo] = await Promise.all([
+  const [team, maxPlayers, minPlayers, locked, rankInfo] = await Promise.all([
     prisma.team.findUnique({
       where: { id: session.user.teamId },
       include: {
@@ -33,6 +33,7 @@ export default async function TeamManagementPage() {
     }),
     getMaxPlayersPerTeam(),
     getMinPlayersToPlay(),
+    getRosterLocked(),
     getTeamRank(session.user.teamId),
   ]);
 
@@ -99,6 +100,13 @@ export default async function TeamManagementPage() {
         </div>
       )}
 
+      {locked && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-500">
+          Les effectifs sont actuellement verrouillés par l&apos;administration.
+          Contactez un administrateur pour toute modification.
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Effectif</CardTitle>
@@ -115,6 +123,7 @@ export default async function TeamManagementPage() {
               role: p.role,
             }))}
             maxPlayers={maxPlayers}
+            locked={locked}
           />
         </CardContent>
       </Card>

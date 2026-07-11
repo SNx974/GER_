@@ -30,6 +30,7 @@ export async function Sidebar() {
           { href: "/admin/matches", label: "Matchs", icon: "matches" },
           { href: "/admin/results", label: "Résultats", icon: "results" },
           { href: "/admin/maps", label: "Maps", icon: "maps" },
+          { href: "/admin/rosters", label: "Effectifs", icon: "team" },
           { href: "/admin/chat", label: "Tchat IA", icon: "chat" },
           { href: "/admin/settings", label: "Paramètres", icon: "settings" },
         ] satisfies NavLink[])

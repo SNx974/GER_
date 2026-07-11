@@ -144,6 +144,7 @@ model GlobalSetting {
   id                String   @id @default("global")
   maxPlayersPerTeam Int      @default(7)
   minPlayersToPlay  Int      @default(5)
+  rosterLocked      Boolean  @default(false)
   updatedAt         DateTime @updatedAt
 }
 
@@ -245,6 +246,8 @@ model Match {
 
   winnerId    String?
   winner      Team?   @relation("WinnerTeam", fields: [winnerId], references: [id])
+
+  reminderSentAt DateTime? // évite les doublons du rappel email 30 min avant
 
   mapbanActions MapbanAction[]
   maps          MatchMap[]     // maps de la série (1 pour BO1, jusqu'à 3/5)

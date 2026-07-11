@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { registerSchema } from "@/lib/validators/auth";
+import { sendRegistrationWelcomeEmail } from "@/lib/email";
 
 export async function POST(req: Request) {
   let body: unknown;
@@ -58,6 +59,12 @@ export async function POST(req: Request) {
         },
       },
       select: { id: true, email: true, team: { select: { id: true, name: true } } },
+    });
+
+    await sendRegistrationWelcomeEmail({
+      to: { email: user.email, name: captainName },
+      captainName,
+      teamName,
     });
 
     return NextResponse.json({ ok: true, user }, { status: 201 });
