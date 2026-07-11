@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { CalendarPlus, Trash2 } from "lucide-react";
 import { addAvailability, deleteAvailability } from "./actions";
+import { formatDateTime } from "@/lib/format-date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,12 +25,7 @@ export type AvailabilityRow = {
   note: string | null;
 };
 
-function fmt(iso: string) {
-  return new Date(iso).toLocaleString("fr-FR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
+const fmt = formatDateTime;
 
 export function AvailabilityManager({ items }: { items: AvailabilityRow[] }) {
   const [pending, startTransition] = useTransition();

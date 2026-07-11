@@ -6,6 +6,8 @@
  * compte, une proposition, un match...) de fonctionner sans email configuré.
  */
 
+import { formatDateTime } from "@/lib/format-date";
+
 type SendEmailInput = {
   to: { email: string; name?: string }[];
   subject: string;
@@ -67,7 +69,7 @@ function layout(title: string, bodyHtml: string): string {
 }
 
 function fmtDate(date: Date): string {
-  return date.toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short" });
+  return formatDateTime(date, { dateStyle: "full", timeStyle: "short" });
 }
 
 // ─── 1. Proposition de match envoyée ───

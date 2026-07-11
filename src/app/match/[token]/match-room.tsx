@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Ban, Check, Swords, Trophy } from "lucide-react";
 import { performStep } from "./actions";
 import type { RoomState, RoomMap } from "@/lib/match-room";
+import { formatDateTime } from "@/lib/format-date";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -88,10 +89,7 @@ export function MatchRoom({ token, initialState, viewerLetter }: Props) {
             La salle ouvrira à l&apos;heure du match :
           </p>
           <p className="text-lg font-semibold">
-            {scheduled.toLocaleString("fr-FR", {
-              dateStyle: "full",
-              timeStyle: "short",
-            })}
+            {formatDateTime(scheduled, { dateStyle: "full", timeStyle: "short" })}
           </p>
         </div>
       ) : state.status === "MAPBAN" ? (
@@ -197,10 +195,7 @@ export function MatchRoom({ token, initialState, viewerLetter }: Props) {
             </p>
             <p>
               <span className="text-muted-foreground">Date :</span>{" "}
-              {scheduled.toLocaleString("fr-FR", {
-                dateStyle: "long",
-                timeStyle: "short",
-              })}
+              {formatDateTime(scheduled, { dateStyle: "long", timeStyle: "short" })}
             </p>
             <div>
               <span className="text-muted-foreground">

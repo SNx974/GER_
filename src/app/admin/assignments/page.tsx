@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { formatDateTime } from "@/lib/format-date";
 import { AppShell } from "@/components/app-shell";
 import { CreateAssignmentForm } from "./create-assignment-form";
 import { AssignmentActions } from "./assignment-actions";
@@ -84,10 +85,8 @@ export default async function AdminAssignmentsPage() {
                         {a.teamB.tag ? ` [${a.teamB.tag}]` : ""}
                       </CardTitle>
                       <CardDescription>
-                        {a.format} · Fenêtre :{" "}
-                        {a.windowStart.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })}{" "}
-                        →{" "}
-                        {a.windowEnd.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })}
+                        {a.format} · Fenêtre : {formatDateTime(a.windowStart)} →{" "}
+                        {formatDateTime(a.windowEnd)}
                       </CardDescription>
                     </div>
                     <Badge variant={st.variant}>{st.label}</Badge>
@@ -96,7 +95,7 @@ export default async function AdminAssignmentsPage() {
                     {a.proposedDate && a.status !== "AGREED" && (
                       <p className="text-sm">
                         Proposition en cours par <strong>{a.proposedByTeam?.name}</strong> :{" "}
-                        {a.proposedDate.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })}
+                        {formatDateTime(a.proposedDate)}
                       </p>
                     )}
                     {(a.status === "PENDING" || a.status === "ESCALATED") && (

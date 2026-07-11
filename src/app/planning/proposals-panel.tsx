@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { Check, X, Ban } from "lucide-react";
 import { respondProposal, cancelProposal } from "./actions";
+import { formatDateTime } from "@/lib/format-date";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -22,12 +23,7 @@ export type SentProposal = {
   status: string;
 };
 
-function fmt(iso: string) {
-  return new Date(iso).toLocaleString("fr-FR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
+const fmt = formatDateTime;
 
 const STATUS_LABEL: Record<string, { label: string; variant: "default" | "secondary" | "success" | "destructive" }> = {
   PENDING: { label: "En attente", variant: "secondary" },

@@ -1,5 +1,6 @@
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import type { SubmissionSnapshot } from "@/lib/validators/result";
+import { formatDateTime } from "@/lib/format-date";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -31,11 +32,7 @@ function SnapshotCard({
       <CardHeader>
         <CardTitle className="text-base">{title}</CardTitle>
         <CardDescription>
-          Soumis le{" "}
-          {new Date(snapshot.submittedAt).toLocaleString("fr-FR", {
-            dateStyle: "medium",
-            timeStyle: "short",
-          })}
+          Soumis le {formatDateTime(snapshot.submittedAt)}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">

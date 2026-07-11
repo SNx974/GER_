@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check, Send } from "lucide-react";
 import { proposeAssignmentDate, acceptAssignmentDate } from "./actions";
+import { formatDateTime } from "@/lib/format-date";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -19,9 +20,7 @@ export type AssignmentRow = {
   proposedByMe: boolean;
 };
 
-function fmt(iso: string) {
-  return new Date(iso).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
-}
+const fmt = formatDateTime;
 
 function toLocalInputValue(date: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");

@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { formatDateTime } from "@/lib/format-date";
 import { AppShell } from "@/components/app-shell";
 import { AdminResultActions } from "./result-actions";
 import { Badge } from "@/components/ui/badge";
@@ -66,11 +67,7 @@ export default async function AdminResultsPage() {
                         {r.match.teamB.name}
                       </CardTitle>
                       <CardDescription>
-                        {r.match.format} ·{" "}
-                        {r.createdAt.toLocaleString("fr-FR", {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        })}
+                        {r.match.format} · {formatDateTime(r.createdAt)}
                       </CardDescription>
                     </div>
                     <Badge variant={st.variant}>{st.label}</Badge>

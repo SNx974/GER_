@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { formatDateTime } from "@/lib/format-date";
 import { AppShell } from "@/components/app-shell";
 import { AdminMatchActions } from "./match-actions";
 import { Badge } from "@/components/ui/badge";
@@ -69,11 +70,7 @@ export default async function AdminMatchesPage() {
                         {m.teamB.tag ? ` [${m.teamB.tag}]` : ""}
                       </CardTitle>
                       <CardDescription>
-                        {m.scheduledAt.toLocaleString("fr-FR", {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        })}{" "}
-                        · {m.format}
+                        {formatDateTime(m.scheduledAt)} · {m.format}
                       </CardDescription>
                     </div>
                     <Badge variant={st.variant}>{st.label}</Badge>

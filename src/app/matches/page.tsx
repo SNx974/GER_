@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { requireAuth } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
+import { formatDateTime } from "@/lib/format-date";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,11 +73,7 @@ export default async function MatchesPage() {
                       {opponent.tag ? ` [${opponent.tag}]` : ""}
                     </CardTitle>
                     <CardDescription>
-                      {m.scheduledAt.toLocaleString("fr-FR", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}{" "}
-                      · {m.format}
+                      {formatDateTime(m.scheduledAt)} · {m.format}
                     </CardDescription>
                   </div>
                   <Badge variant={st.variant}>{st.label}</Badge>
