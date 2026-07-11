@@ -3,8 +3,10 @@
  *
  * - Si OPENROUTER_API_KEY est défini : appel à OpenRouter (API unifiée,
  *   compatible OpenAI) avec un modèle vision gratuit — par défaut Gemma 4
- *   31B — pour lire les screenshots de tableaux des scores et détecter des
- *   anomalies / en extraire les stats.
+ *   31B, ou le routeur automatique "openrouter/free" via OPENROUTER_MODEL —
+ *   pour lire les screenshots de tableaux des scores et détecter des
+ *   anomalies / en extraire les stats. L'URL de base est personnalisable
+ *   via OPENROUTER_BASE_URL (défaut : https://openrouter.ai/api/v1).
  * - Sinon : repli heuristique local pour que le flux reste fonctionnel.
  *
  * Le résultat est stocké tel quel dans MatchResult.aiAnalysis (JSON).
@@ -37,6 +39,14 @@ export type AiAnalysis = {
 const KILLS_MAX_PLAUSIBLE = 50; // par map
 const SCORE_DIFF_MAX = 5; // écart toléré total kills vs total morts sur une map
 const DEFAULT_MODEL = "google/gemma-4-31b-it:free";
+
+function openRouterEndpoint(): string {
+  const base = (process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1").replace(
+    /\/+$/,
+    ""
+  );
+  return `${base}/chat/completions`;
+}
 
 function heuristicAnalysis(maps: MapStatInput[]): AiAnalysis {
   const anomalies: string[] = [];
@@ -163,7 +173,7 @@ async function callOpenRouter(
   model: string,
   content: VisionContentPart[]
 ): Promise<unknown> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const res = await fetch(openRouterEndpoint(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -334,7 +344,7 @@ async function callOpenRouterChat(
   model: string,
   messages: ChatMessage[]
 ): Promise<string> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const res = await fetch(openRouterEndpoint(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -67,7 +67,9 @@ L'app tourne sur http://localhost:3000
 - **Analyse IA** : reconnaissance d'image via **OpenRouter** (`OPENROUTER_API_KEY`), modèle par
   défaut `google/gemma-4-31b-it:free` (gratuit, vision). Les screenshots sont envoyés en base64 pour
   comparer les stats déclarées aux tableaux des scores et pré-remplir les stats. Sans clé, repli
-  heuristique local. Le modèle est configurable via `OPENROUTER_MODEL` sans changer de code.
+  heuristique local. Le modèle est configurable via `OPENROUTER_MODEL` sans changer de code —
+  `openrouter/free` (routeur automatique) est aussi supporté : plus résilient si un modèle précis
+  est retiré, mais le modèle qui répond peut varier d'un appel à l'autre.
 - **Screenshots** : uploadés via `/api/upload` et stockés dans `uploads/` (voir la section
   Déploiement ci-dessous pour le montage du volume persistant).
 
@@ -90,8 +92,9 @@ plateforme (Dockerfile ou détection automatique type Nixpacks).
    | `NEXTAUTH_SECRET` | un secret aléatoire (`openssl rand -base64 32`) |
    | `NEXTAUTH_URL` | l'URL publique de l'app, **avec le protocole** (ex : `https://ger.mondomaine.com`) |
    | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | l'admin initial |
-   | `OPENROUTER_API_KEY` | clé gratuite depuis [openrouter.ai/keys](https://openrouter.ai/keys) (reconnaissance d'image) |
-   | `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` (optionnel, défaut déjà appliqué) |
+   | `OPENROUTER_API_KEY` | clé gratuite depuis [openrouter.ai/keys](https://openrouter.ai/keys) (reconnaissance d'image + tchat admin) |
+   | `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` (déterministe) ou `openrouter/free` (routeur auto, résilient) — optionnel |
+   | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` (optionnel, défaut déjà appliqué) |
 
 4. **Port** : l'app écoute sur `3000`.
 5. **Volume persistant (important)** : monter un volume Dokploy sur `/app/uploads`.
